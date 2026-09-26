@@ -328,7 +328,7 @@
           label: `${rowLabel} · ${label}`,
           value: spec,
           filled: field.startsWith('search:') ? searchFilled(row) && !session.settings.overwrite : isFilled(element),
-          run: () => (field.startsWith('search:') ? controls.fillMidasSearch(element, spec.text) : setElement(element, spec)),
+          run: () => (field.startsWith('search:') ? controls.fillMidasSearch(element, spec.text, spec.lookup || { reviewDirect: true }) : setElement(element, spec)),
         });
       }
       if (after) await after(row, entry, index);
@@ -345,7 +345,7 @@
       label: '학교명',
       value: entry.school,
       filled: !!(byName('highschool.academyName') && byName('highschool.academyName').value),
-      run: () => controls.fillMidasSearch(search, entry.school),
+      run: () => controls.fillMidasSearch(search, entry.school, { campus: entry.campus, reviewDirect: true }),
     });
     const plan = [
       ['highschool.entranceDate', '입학', { date: entry.startDate }],
@@ -372,7 +372,7 @@
 
   function collegePlan(entry) {
     return [
-      ['search:college', '학교명', { text: entry.school }],
+      ['search:college', '학교명', { text: entry.school, lookup: { campus: entry.campus, reviewDirect: true } }],
       ['degreeTypeCode', '학위', { choice: DEGREE[entry.level] || [] }],
       ['headOrBranch', '본교/분교', { choice: [entry.campus] }],
       ['entranceDate', '입학', { date: entry.startDate }],
@@ -395,7 +395,7 @@
         label: `${title} ${index + 1} · 전공`,
         value: entry.major,
         filled: !!(hidden && hidden.value),
-        run: () => controls.fillMidasSearch(search, entry.major),
+        run: () => controls.fillMidasSearch(search, entry.major, { reviewDirect: true }),
       });
     }
     const type = majorRow.querySelector('select[name$=".majorTypeCode"]');
@@ -539,6 +539,21 @@
 
   // ---------------------------------------------------------------------------
 
+  /**
+   * 마이다스인 첨부 칸은 형식 오류 시 alert()로 페이지를 멈추는 검증기를 쓰므로 자동 첨부하지 않는다.
+   * 대신 등록된 파일이 있는데 첨부 칸이 있으면 직접 첨부하도록 알린다(조용한 누락 방지).
+   */
+  async function noticeAttachments(session) {
+    const inputs = [...document.querySelectorAll('input[type="file"]')].filter((input) => !input.closest('[data-wrap="photo"], .photo') && dom.isVisible(input.closest('.subject') || input));
+    if (!inputs.length) return;
+    for (const slot of KApply.schema.FILE_SLOTS) {
+      const meta = await session.fileMeta(slot.key);
+      if (!meta) continue;
+      const matched = inputs.some((input) => matcher.matchFile(midasLabel(input)) === slot.key);
+      if (matched) session.manual('제출 서류', slot.label, `마이다스인 첨부는 자동 업로드를 지원하지 않습니다. '${meta.name}'을(를) 직접 첨부해 주세요.`);
+    }
+  }
+
   async function fill(session) {
     await fillRegistration(session);
     await fillSingles(session);
@@ -552,6 +567,8 @@
       const entries = session.list(definition.source).filter(definition.filter || (() => true));
       await fillLoop(session, { loop: definition.loop, title: definition.title, entries, plan: definition.plan });
     }
+
+    await noticeAttachments(session);
 
     if (document.querySelector('button[data-step]')) {
       session.report.notice('마이다스인은 단계별로 저장됩니다. [임시저장] 또는 [다음]으로 이동한 뒤 다음 단계에서 다시 실행해 주세요.');
