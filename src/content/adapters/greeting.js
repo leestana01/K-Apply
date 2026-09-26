@@ -47,6 +47,10 @@
   const isExtracurricular = (entry) => entry.type !== '봉사활동' && entry.type !== '해외경험';
   const orName = (entry) => entry.organization || entry.name;
   const describe = (entry) => [entry.name, entry.description].filter(Boolean).join(' - ');
+  /** 코드 목록에서 골라야 하는 값: 목록에 없어 직접 입력하면 "확인 필요"로 알린다. */
+  const coded = (value, lookup = {}) => (value ? { text: value, lookup: { reviewDirect: true, ...lookup } } : '');
+  /** 학교명: 캠퍼스까지 맞는 코드 항목을 고른다. */
+  const school = (entry) => coded(entry.school, { campus: entry.campus });
 
   /**
    * 반복 섹션 정의. fields의 값은 (entry) => 값 | { choice: 후보배열 } | { checked: boolean }
@@ -61,7 +65,7 @@
       filter: (entry) => entry.level === 'highschool',
       key: 'schoolName',
       fields: {
-        schoolName: (e) => e.school,
+        schoolName: school,
         completionStatus: (e) => ({ choice: [e.status] }),
         'enrollmentPeriod.startDate': (e) => e.startDate,
         'enrollmentPeriod.endDate': (e) => e.endDate,
@@ -74,14 +78,14 @@
       filter: isUniversity,
       key: 'schoolName',
       fields: {
-        schoolName: (e) => e.school,
+        schoolName: school,
         'enrollmentPeriod.startDate': (e) => e.startDate,
         'enrollmentPeriod.endDate': (e) => e.endDate,
         completionStatus: (e) => ({ choice: [e.status] }),
         'gpa.scoreScale': (e) => (e.gpa ? { choice: [e.gpaScale] } : ''),
         'gpa.score': (e) => e.gpa,
         'majors.0.majorClassification': (e) => (e.major ? { choice: ['주전공'] } : ''),
-        'majors.0': (e) => e.major,
+        'majors.0': (e) => coded(e.major),
       },
     },
     {
@@ -92,14 +96,14 @@
       key: 'schoolName',
       fields: {
         degreeLevel: (e) => ({ choice: text.candidatesFor('graduateDegree', e.level) }),
-        schoolName: (e) => e.school,
+        schoolName: school,
         'enrollmentPeriod.startDate': (e) => e.startDate,
         'enrollmentPeriod.endDate': (e) => e.endDate,
         completionStatus: (e) => ({ choice: [e.status] }),
         'gpa.scoreScale': (e) => (e.gpa ? { choice: [e.gpaScale] } : ''),
         'gpa.score': (e) => e.gpa,
         'majors.0.majorClassification': (e) => (e.major ? { choice: ['주전공'] } : ''),
-        'majors.0': (e) => e.major,
+        'majors.0': (e) => coded(e.major),
       },
     },
     {
@@ -185,7 +189,7 @@
       key: 'testName',
       fields: {
         foreignLanguage: (e) => (e.language ? { choice: [e.language] } : ''),
-        testName: (e) => (e.test ? { choice: [e.test], text: e.test } : ''),
+        testName: (e) => (e.test ? { choice: [e.test], text: e.test, lookup: { reviewDirect: true } } : ''),
         'score.score': (e) => e.score,
         grade: (e) => (e.grade ? { choice: [e.grade], text: e.grade } : ''),
         acquisitionDate: (e) => e.date,
@@ -198,7 +202,7 @@
       title: '자격증',
       key: 'credentials',
       fields: {
-        credentials: (e) => e.name,
+        credentials: (e) => coded(e.name),
         issuingAgency: (e) => e.issuer,
         acquisitionDate: (e) => e.date,
         registrationNumber: (e) => e.number,
@@ -269,7 +273,7 @@
       case 'radio':
         return controls.fillRadio([...document.getElementsByName(element.name)], value.choice || []);
       case 'combobox':
-        return controls.fillArkCombobox(element, value.text != null ? value.text : (value.choice || [])[0]);
+        return controls.fillArkCombobox(element, value.text != null ? value.text : (value.choice || [])[0], value.lookup || {});
       case 'text':
         return controls.fillText(element, value.text != null ? value.text : (value.choice || [])[0]);
       default:
@@ -294,7 +298,8 @@
       return { choice };
     }
     if (kind === 'date') return { text: raw };
-    return { text: session.textValue(path, element) };
+    // 기본 정보의 콤보박스(이메일 도메인 제안 등)는 입력값 자체가 유효하다.
+    return { text: session.textValue(path, element), lookup: { freeText: true } };
   }
 
   // ---------------------------------------------------------------------------
@@ -416,31 +421,63 @@
   // 제출 서류
   // ---------------------------------------------------------------------------
 
-  const FILE_NAME_PATTERN = /\.(pdf|docx?|hwpx?|pptx?|xlsx?|zip|png|jpe?g|key)\b/i;
+  const UPLOAD_ITEM = '[data-scope="file-upload"][data-part="item"]';
+
+  function uploadItems(root) {
+    return [...root.querySelectorAll(UPLOAD_ITEM)];
+  }
+
+  /** 서버 업로드 후 그리팅 화면에 해당 파일이 "accepted" 상태로 표시됐는지 확인한다. */
+  function confirmUploaded(root, record) {
+    const items = uploadItems(root);
+    if (items.some((item) => item.getAttribute('data-type') === 'rejected')) {
+      return '그리팅이 파일을 거부했습니다. 허용 형식(예: PDF)과 용량을 확인해 주세요.';
+    }
+    const accepted = items.find((item) => {
+      if (item.getAttribute('data-type') !== 'accepted') return false;
+      const name = item.querySelector('[data-part="item-name"]');
+      return name && dom.textOf(name) === record.name;
+    });
+    return accepted ? true : '화면에 첨부된 파일이 표시되지 않았습니다.';
+  }
 
   async function fillDocuments(session) {
-    const roots = [...document.querySelectorAll(FIELD_ROOT)].filter((root) => root.querySelector('input[type="file"]'));
+    // 업로드 영역이 직접 속한(중첩된 하위 필드가 아닌) 필드 루트만 대상으로 한다.
+    const roots = [...document.querySelectorAll(FIELD_ROOT)].filter((root) => {
+      const uploader = root.querySelector('input[type="file"], [data-scope="file-upload"], [data-scope="toggle-group"]');
+      return uploader && uploader.closest(FIELD_ROOT) === root;
+    });
     for (const root of roots) {
       const label = text.cleanLabel(root.querySelector('label[data-part="label"]')?.textContent || '');
       const slot = matcher.matchFile(label);
       if (!slot) continue;
-      const record = await session.file(slot);
+      const meta = await session.fileMeta(slot);
       const toggles = [...root.querySelectorAll('[data-scope="toggle-group"][data-part="item"]')];
       const urlToggle = toggles.find((toggle) => /url|링크/i.test(dom.textOf(toggle)));
       const fileToggle = toggles.find((toggle) => /파일|file/i.test(dom.textOf(toggle)));
 
-      if (record) {
+      if (meta) {
         if (fileToggle && fileToggle.getAttribute('data-state') !== 'on') {
           fileToggle.click();
-          await dom.sleep(150);
+          await dom.sleep(200);
         }
-        const input = root.querySelector('input[type="file"]');
+        // 이미 첨부된 파일은 삭제에 확인 창이 필요한 파괴적 동작이므로, 덮어쓰기 설정과 관계없이 유지한다.
+        if (uploadItems(root).length > 0) {
+          session.report.add(KApply.engine.STATUS.SKIPPED, SECTION_TITLE.documents, label, '이미 첨부된 파일이 있음 (교체하려면 직접 삭제 후 다시 실행)');
+          continue;
+        }
+        const input = await dom.waitFor(() => root.querySelector('input[type="file"]'), { timeout: 1500 });
         await session.applyFile({
           section: SECTION_TITLE.documents,
           label,
           slot,
           input,
-          filled: FILE_NAME_PATTERN.test(root.textContent || '') || (input && input.files.length > 0),
+          hint: dom.textOf(root.querySelector('[data-part="helper-text"]')),
+          confirm: (record) => confirmUploaded(root, record),
+          rejected: () =>
+            uploadItems(root).some((item) => item.getAttribute('data-type') === 'rejected')
+              ? '그리팅이 파일을 거부했습니다. 허용 형식(예: PDF)과 용량을 확인해 주세요.'
+              : null,
         });
         continue;
       }
