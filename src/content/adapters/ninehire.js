@@ -51,8 +51,14 @@
     return [...block.querySelectorAll(selector)].filter((element) => ownedBy(block, element) && dom.isVisible(element));
   }
 
+  /**
+   * 선택 칸의 안내 문구(예: "병역구분", "선택해주세요.")는 회색 color 속성이 붙은 span으로 표시된다.
+   * 선택되면 color 속성이 없는 span으로 바뀐다.
+   */
   function selectorFilled(selector) {
-    return !PLACEHOLDER_SELECT.test(dom.textOf(selector));
+    const label = selector.querySelector('span');
+    if (!label) return !PLACEHOLDER_SELECT.test(dom.textOf(selector));
+    return !label.hasAttribute('color');
   }
 
   // ---------------------------------------------------------------------------
@@ -61,7 +67,7 @@
 
   async function fillSingle(session, block, label) {
     if (block.querySelector('[class*="AddressInput__"]')) {
-      if (session.get('basic.address')) session.manual(SECTION_TITLE.basic, label, '주소 검색 버튼으로 직접 선택해 주세요.');
+      await fillAddress(session, block, label);
       return;
     }
     const path = matcher.matchField(label);
@@ -72,6 +78,10 @@
 
     const picker = own(block, '.ant-picker input')[0];
     if (picker) {
+      if (!text.parseDate(raw)) {
+        session.manual(section, label, `날짜를 고르는 칸인데 프로필 값('${raw}')이 날짜가 아닙니다. 날짜(예: 2026-10-01)로 저장하거나 직접 선택해 주세요.`);
+        return;
+      }
       await session.apply({ section, label, value: raw, filled: controls.hasValue(picker), run: () => controls.fillAntDate(picker, raw) });
       return;
     }
@@ -84,6 +94,15 @@
         filled: selectorFilled(selector),
         run: () => controls.fillAntDropdown(selector, session.candidates(path)),
       });
+      // 병역 구분을 고르면 군별·계급·기간 등이 나타난다.
+      if (path === 'military.status' && status !== STATUS.FAILED) {
+        await dom.sleep(300);
+        const parts = await fillPlan(block, militaryPlan(session), new Set([selector]));
+        parts.forEach((part) =>
+          session.report.add(part.ok ? (part.review ? STATUS.REVIEW : STATUS.FILLED) : STATUS.FAILED, section, `${label} · ${part.label}`, part.reason || part.review || '')
+        );
+        return;
+      }
       // "기타" 등을 고르면 상세 입력칸이 새로 나타난다. 내용은 알 수 없으므로 사용자에게 맡긴다.
       await dom.sleep(150);
       const detail = own(block, 'input[type="text"], input:not([type]), textarea').find((node) => !controls.hasValue(node));
@@ -110,6 +129,60 @@
 
   function stem(name) {
     return String(name).replace(/\.[^.]+$/, '');
+  }
+
+  /**
+   * 주소지(카카오 우편번호 위젯): 검색 버튼을 누르면 위젯 대신 저장된 주소를 선택 결과로 전달한다.
+   * 나인하이어는 위젯 결과 중 우편번호·도로명·지번 주소만 사용한다.
+   */
+  async function fillAddress(session, block, label) {
+    const section = SECTION_TITLE.basic;
+    const zip = session.get('basic.postalCode');
+    const road = session.get('basic.address');
+    if (text.isBlank(zip) || text.isBlank(road)) {
+      if (!text.isBlank(zip) || !text.isBlank(road)) {
+        session.manual(section, label, '프로필에 우편번호와 도로명 주소가 모두 있어야 합니다. 옵션 화면의 [주소 검색]으로 입력해 주세요.');
+      }
+      return;
+    }
+    const button = own(block, 'button').find((node) => /검색/.test(dom.textOf(node)));
+    const shown = () => (block.textContent || '').replace(/\s+/g, '');
+    const filled = /\d{5}/.test(own(block, '[class*="AddressInput__DivLikeInput"]').map(dom.textOf).join(' '));
+    const status = await session.apply({
+      section,
+      label,
+      value: road,
+      filled,
+      run: async () => {
+        if (!button) return { ok: false, reason: '주소 검색 버튼을 찾지 못했습니다.' };
+        const outcome = await KApply.engine.postcodeViaBridge(button, {
+          zonecode: text.digitsOnly(zip),
+          roadAddress: road,
+          jibunAddress: session.get('basic.jibunAddress') || '',
+          address: road,
+          addressType: 'R',
+          userSelectedType: 'R',
+          autoRoadAddress: '',
+          autoJibunAddress: '',
+          buildingName: '',
+          apartment: 'N',
+        });
+        if (!outcome.ok) return outcome;
+        const content = shown();
+        const ok = content.includes(text.digitsOnly(zip)) && content.includes(road.replace(/\s+/g, ''));
+        return ok ? { ok: true } : { ok: false, reason: '선택한 주소가 화면에 반영되지 않았습니다.' };
+      },
+    });
+    const detail = session.get('basic.addressDetail');
+    if (!detail || status === STATUS.FAILED) return;
+    const input = await dom.waitFor(() =>
+      own(block, 'input[type="text"], input:not([type])').find((node) => !node.readOnly && !node.disabled && /상세|나머지/.test(placeholderOf(node)))
+    );
+    if (input) {
+      await session.apply({ section, label: `${label} · 상세 주소`, value: detail, filled: controls.hasValue(input), run: () => controls.fillText(input, detail) });
+    } else {
+      session.manual(section, `${label} · 상세 주소`, '상세 주소 입력칸을 찾지 못했습니다. 직접 입력해 주세요.');
+    }
   }
 
   async function fillDocument(session, block, label) {
@@ -167,21 +240,15 @@
    * 하위 입력 폼을 채우고 [입력사항 저장]을 누른다.
    * @returns {{ok:boolean, reason?:string, review?:string}}
    */
-  async function runSubform(block, plan) {
+  /**
+   * 계획(plan)에 따라 블록 안의 체크박스·선택·날짜·텍스트를 채운다. 저장 버튼은 누르지 않는다.
+   * @param {Set<HTMLElement>} done 이미 처리한 선택 컨트롤
+   * @returns {Promise<Array<{label:string, ok:boolean, review?:string, reason?:string}>>}
+   */
+  async function fillPlan(block, plan, done = new Set()) {
     const selectors = () => own(block, SELECTOR);
-    const done = new Set();
-    /** @type {Array<{label:string, ok:boolean, review?:string, reason?:string}>} */
     const parts = [];
     const record = (label, value) => parts.push({ label, ...KApply.engine.toOutcome(value) });
-
-    if (plan.top && plan.top.length) {
-      const top = selectors()[0];
-      if (!top || !(await controls.fillAntDropdown(top, plan.top))) {
-        return { ok: false, reason: '구분 선택지를 찾지 못했습니다.' };
-      }
-      done.add(top);
-      await dom.sleep(250);
-    }
 
     for (const rule of plan.checks || []) {
       const checkbox = own(block, 'input[type="checkbox"]').find((node) => rule.test.test(checkboxLabel(node)));
@@ -195,6 +262,7 @@
       done.add(selector);
       const label = dom.textOf(selector);
       record(label, await controls.fillAntDropdown(selector, rule.candidates));
+      await dom.sleep(150);
     }
 
     for (const rule of plan.dates || []) {
@@ -206,7 +274,7 @@
     for (const rule of plan.texts || []) {
       if (text.isBlank(rule.value)) continue;
       const input = own(block, 'input[type="text"], input:not([type]), input[type="number"], textarea').find(
-        (node) => !node.closest('.ant-picker') && rule.test.test(placeholderOf(node)) && !node.disabled
+        (node) => !node.closest('.ant-picker') && rule.test.test(placeholderOf(node)) && !node.disabled && !node.readOnly
       );
       if (!input) continue;
       const label = placeholderOf(input);
@@ -217,7 +285,27 @@
         record(label, await controls.fillText(input, rule.value));
       }
     }
+    return parts;
+  }
 
+  /**
+   * 하위 입력 폼을 채우고 [입력사항 저장]을 누른다.
+   * @returns {{ok:boolean, reason?:string, review?:string}}
+   */
+  async function runSubform(block, plan) {
+    const selectors = () => own(block, SELECTOR);
+    const done = new Set();
+
+    if (plan.top && plan.top.length) {
+      const top = selectors()[0];
+      if (!top || !(await controls.fillAntDropdown(top, plan.top))) {
+        return { ok: false, reason: '구분 선택지를 찾지 못했습니다.' };
+      }
+      done.add(top);
+      await dom.sleep(250);
+    }
+
+    const parts = await fillPlan(block, plan, done);
     const failures = parts.filter((part) => !part.ok);
     const button = saveButton(block);
     if (!button) return { ok: false, reason: '저장 버튼을 찾지 못했습니다.' };
@@ -243,6 +331,7 @@
     return notes.length ? { ok: true, review: notes.join(' / ') } : { ok: true };
   }
 
+  /** @returns {Promise<boolean>} 모든 항목을 저장했거나 건너뛰었으면 true, 저장 실패로 중단했으면 false */
   async function fillSubformList(session, block, sectionTitle, entries, planFor) {
     for (let index = 0; index < entries.length; index += 1) {
       const plan = planFor(entries[index]);
@@ -266,9 +355,10 @@
         if (remaining > 0) {
           session.manual(sectionTitle, `${sectionTitle} ${index + 2}~${entries.length}`, `위 항목을 먼저 저장해야 해서 나머지 ${remaining}건은 입력하지 않았습니다. 해결 후 다시 실행해 주세요.`);
         }
-        break;
+        return false;
       }
     }
+    return true;
   }
 
   const PLANS = {
@@ -276,6 +366,10 @@
       return {
         key: entry.school,
         top: text.candidatesFor('educationLevel', entry.level),
+        checks: [
+          ...(entry.entryType ? [{ test: /편입/, checked: entry.entryType === '편입' }] : []),
+          ...(entry.dayNight ? [{ test: /야간/, checked: entry.dayNight === '야간' }] : []),
+        ],
         selects: [
           { test: /졸업\s*(상태|구분|여부)/, candidates: [entry.status] },
           { test: /기준\s*학점|만점/, candidates: entry.gpa ? [entry.gpaScale] : [] },
@@ -307,6 +401,8 @@
           { test: /직급|직책|직위/, value: entry.position },
           { test: /부서/, value: entry.department },
           { test: /담당|업무/, value: entry.duties },
+          { test: /연봉|급여/, value: text.digitsOnly(entry.salary) },
+          { test: /퇴사\s*사유|이직|퇴직\s*사유/, value: entry.resignReason },
         ],
       };
     },
@@ -344,7 +440,8 @@
         dates: [{ test: /취득|응시|발행|일자|날짜/, value: entry.date }],
         texts: [
           { test: /시험/, value: entry.test },
-          { test: /점수/, value: entry.score },
+          { test: /주최|주관|기관/, value: entry.issuer },
+          { test: /점수/, value: entry.score || entry.grade },
           { test: /등급|급수/, value: entry.grade },
           { test: /번호/, value: entry.number },
         ],
@@ -357,7 +454,8 @@
     return {
       key: '',
       selects: [
-        { test: /병역|구분/, candidates: text.candidatesFor('militaryStatus', military.status) },
+        { test: /병역\s*구분|^병역/, candidates: text.candidatesFor('militaryStatus', military.status) },
+        { test: /복무\s*구분|역종|복무\s*형태/, candidates: [military.serviceType] },
         { test: /군별|군\s*종류/, candidates: [military.branch] },
         { test: /계급/, candidates: [military.rank] },
         { test: /제대|전역\s*구분/, candidates: [military.discharge] },
@@ -366,7 +464,10 @@
         { test: /입대|시작/, value: military.startDate },
         { test: /전역|제대|종료/, value: military.endDate },
       ],
-      texts: [{ test: /면제/, value: military.exemptionReason }],
+      texts: [
+        { test: /면제/, value: military.exemptionReason },
+        { test: /병과|특기/, value: military.specialty },
+      ],
     };
   }
 
@@ -376,8 +477,13 @@
     } else if (/경력/.test(label) && !/유무|여부/.test(label)) {
       await fillSubformList(session, block, '경력', session.list('careers'), PLANS.careers);
     } else if (/자격|수상|면허/.test(label)) {
-      if (/자격|면허/.test(label)) await fillSubformList(session, block, '자격증', session.list('certificates'), PLANS.certificates);
-      if (/수상/.test(label)) await fillSubformList(session, block, '수상', session.list('awards'), PLANS.awards);
+      // 자격증과 수상이 같은 하위 폼을 쓰므로, 앞 목록 저장이 실패하면 값이 섞이지 않게 멈춘다.
+      let ok = true;
+      if (/자격|면허/.test(label)) ok = await fillSubformList(session, block, '자격증', session.list('certificates'), PLANS.certificates);
+      if (/수상/.test(label)) {
+        if (ok) await fillSubformList(session, block, '수상', session.list('awards'), PLANS.awards);
+        else if (session.list('awards').length) session.manual('수상', '수상', '같은 입력 폼의 자격증 항목을 먼저 저장해야 해서 입력하지 않았습니다. 해결 후 다시 실행해 주세요.');
+      }
     } else if (/어학|외국어/.test(label)) {
       await fillSubformList(session, block, '어학', session.list('languages'), PLANS.languages);
     } else if (/병역/.test(label) && session.profile.military.status) {
