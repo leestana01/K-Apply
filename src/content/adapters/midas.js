@@ -374,7 +374,7 @@
     return [
       ['search:college', '학교명', { text: entry.school, lookup: { campus: entry.campus, reviewDirect: true } }],
       ['degreeTypeCode', '학위', { choice: DEGREE[entry.level] || [] }],
-      ['headOrBranch', '본교/분교', { choice: [entry.campus] }],
+      ['headOrBranch', '본교/분교', { choice: [entry.campusType] }],
       ['entranceDate', '입학', { date: entry.startDate }],
       ['graduationDate', '졸업', { date: entry.endDate }],
       ['graduationTypeCode', '졸업 구분', { choice: [entry.status] }],
