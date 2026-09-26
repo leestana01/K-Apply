@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "K-Apply — 채용 지원서 자동 입력",
+  "short_name": "K-Apply",
+  "version": "1.0.0",
+  "description": "그리팅·나인하이어·마이다스인 지원서를 한 번 저장한 프로필로 자동 입력합니다. 모든 데이터는 브라우저에만 저장됩니다.",
+  "homepage_url": "https://github.com/leestana01/K-Apply",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "K-Apply",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "permissions": ["storage", "unlimitedStorage", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["src/shared/platforms.js", "src/content/detector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "fill-current-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Alt+Shift+F"
+      },
+      "description": "현재 지원서 자동 입력"
+    }
+  }
+}

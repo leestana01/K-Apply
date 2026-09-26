@@ -1,0 +1,24 @@
+name: 채용 솔루션 지원 요청
+description: 새 채용 솔루션(ATS) 또는 지원서 항목 지원을 요청합니다.
+title: "[지원 요청] "
+labels: ["platform"]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: 솔루션 이름
+      placeholder: 예) 잡코리아 채용관, 원티드 스페이스
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: 공개 공고 예시 URL
+      description: 로그인 없이 지원서 화면까지 열 수 있는 공고가 있으면 좋습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: fields
+    attributes:
+      label: 자동 입력이 필요한 항목
+      placeholder: 기본 정보, 학력, 경력 ...
