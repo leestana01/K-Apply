@@ -64,3 +64,61 @@ test('candidatesFor: 사전에 없는 값은 쉼표로 분리해 그대로 쓴�
   assert.deepEqual(text.candidatesFor('gender', ''), []);
   assert.ok(text.candidatesFor('militaryStatus', '군필').includes('병역필'));
 });
+
+test('matchListed: 정확히 일치하는 코드 항목을 고른다', () => {
+  const options = ['남서울대학교', '서울대학교', '서울과학기술대학교'];
+  assert.deepEqual(text.matchListed(options, '서울대학교'), { index: 1, exact: true });
+});
+
+test('matchListed: 캠퍼스를 지정하면 해당 캠퍼스 항목을 고른다', () => {
+  const options = ['남서울대학교', '서울대학교 (관악)', '서울대학교 (연건)', '서울대학교 (평창)'];
+  assert.deepEqual(text.matchListed(options, '서울대학교', { campus: '관악' }), { index: 1, exact: true });
+  assert.deepEqual(text.matchListed(options, '서울대학교', { campus: '관악캠퍼스' }), { index: 1, exact: true });
+  assert.deepEqual(text.matchListed(['연세대학교(신촌캠퍼스)'], '연세대학교', { campus: '신촌' }), { index: 0, exact: true });
+});
+
+test('matchListed: 캠퍼스 항목이 여럿이면 추측하지 않는다', () => {
+  const options = ['남서울대학교', '서울대학교 (관악)', '서울대학교 (연건)'];
+  const result = text.matchListed(options, '서울대학교');
+  assert.equal(result.index, -1);
+  assert.equal(result.ambiguous, true);
+  assert.deepEqual(result.choices, ['서울대학교 (관악)', '서울대학교 (연건)']);
+});
+
+test('matchListed: 지정한 캠퍼스가 목록에 없으면 다른 캠퍼스를 고르지 않는다', () => {
+  const result = text.matchListed(['서울대학교 (관악)', '서울대학교'], '서울대학교', { campus: '평창' });
+  assert.equal(result.index, -1);
+  assert.equal(result.ambiguous, true);
+});
+
+test('matchListed: 캠퍼스 구분 항목이 하나뿐이면 고르되 확인 메모를 남긴다', () => {
+  const result = text.matchListed(['한국공학대학교', '한국대학교 (본교)'], '한국대학교');
+  assert.equal(result.index, 1);
+  assert.equal(result.exact, false);
+  assert.match(result.note, /한국대학교 \(본교\)/);
+});
+
+test('matchListed: 부분 일치로 다른 학교를 고르지 않는다', () => {
+  assert.deepEqual(text.matchListed(['남서울대학교', '서울대학교병원'], '서울대학교'), { index: -1 });
+  assert.deepEqual(text.matchListed(['TOEIC Speaking'], 'TOEIC'), { index: -1 });
+});
+
+test('fileFormatMismatch: accept 속성을 따른다', () => {
+  assert.equal(text.fileFormatMismatch({ name: 'cv.pdf', type: 'application/pdf' }, { accept: '.pdf' }), null);
+  assert.match(text.fileFormatMismatch({ name: 'cv.docx', type: '' }, { accept: '.pdf,.hwp' }), /\.pdf, \.hwp/);
+  assert.equal(text.fileFormatMismatch({ name: 'photo.png', type: 'image/png' }, { accept: 'image/*' }), null);
+});
+
+test('fileFormatMismatch: 요구 문구를 따른다', () => {
+  const hint = 'PDF 형식으로 제출해주세요.';
+  assert.equal(text.fileFormatMismatch({ name: '이력서.pdf', type: 'application/pdf' }, { hint }), null);
+  assert.match(text.fileFormatMismatch({ name: '이력서.txt', type: 'text/plain' }, { hint }), /PDF 형식을 요구/);
+  assert.match(text.fileFormatMismatch({ name: 'a.docx', type: '' }, { hint: 'PDF 또는 HWP 파일만 업로드 가능합니다' }), /PDF 또는 한글\(HWP\)/);
+});
+
+test('fileFormatMismatch: 요구가 아닌 안내 문구는 무시한다', () => {
+  const hint = '파일 첨부 (50MB 이하, 업로드한 문서는 PDF 파일로 자동 변환됩니다.)';
+  assert.equal(text.fileFormatMismatch({ name: 'a.docx', type: '' }, { hint }), null);
+  assert.equal(text.fileFormatMismatch({ name: 'a.docx', type: '' }, { hint: '포트폴리오를 첨부해 주세요' }), null);
+  assert.equal(text.fileFormatMismatch({ name: 'a.docx', type: '' }, {}), null);
+});
