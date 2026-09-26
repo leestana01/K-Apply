@@ -13,7 +13,12 @@
  *    응답이 2xx이면 업로드 성공으로 보고한다. 요청을 변경하거나 지연시키지 않으며,
  *    감시 중인 파일이 없을 때는 아무 일도 하지 않는다.
  *
- * 파일 내용은 사용자가 업로드하려는 바로 그 페이지에만 전달된다.
+ * 3) 카카오(Daum) 우편번호 위젯 대행 (arm-postcode)
+ *    주소 검색 버튼이 new daum.Postcode({ oncomplete })로 위젯을 열 때, 다음 1회에 한해 위젯을 띄우지 않고
+ *    사용자가 선택한 것과 같은 형태의 결과(zonecode, roadAddress, jibunAddress …)로 oncomplete를 호출한다.
+ *    arm 후 5초가 지나면 원래 위젯으로 복구한다.
+ *
+ * 파일 내용·주소는 사용자가 입력하려는 바로 그 페이지에만 전달된다.
  */
 (function () {
   'use strict';
@@ -167,11 +172,77 @@
     watchers.delete(data.token);
   }
 
+  // ---------------------------------------------------------------------------
+  // 3) 카카오 우편번호 위젯 대행
+  // ---------------------------------------------------------------------------
+
+  let postcodeJob = null;
+  let postcodeTimer = null;
+  let postcodeRestore = null;
+
+  function installPostcodeHook(daum) {
+    const Original = daum.Postcode;
+    if (!Original || Original.__kapply) return;
+    function Replacement(options) {
+      if (!postcodeJob) return new Original(options);
+      const job = postcodeJob;
+      releasePostcode();
+      const complete = () => {
+        if (options && typeof options.oncomplete === 'function') options.oncomplete(job.result);
+        post('postcode-consumed', job.token);
+      };
+      // 위젯을 띄우지 않고, 호출하는 쪽이 embed/open을 부른 뒤 결과를 전달한다.
+      return {
+        embed() {
+          setTimeout(complete, 0);
+        },
+        open() {
+          setTimeout(complete, 0);
+        },
+      };
+    }
+    Replacement.__kapply = true;
+    Replacement.prototype = Original.prototype;
+    daum.Postcode = Replacement;
+    postcodeRestore = () => {
+      if (daum.Postcode === Replacement) daum.Postcode = Original;
+    };
+  }
+
+  function releasePostcode() {
+    clearTimeout(postcodeTimer);
+    postcodeJob = null;
+    if (postcodeRestore) postcodeRestore();
+    postcodeRestore = null;
+  }
+
+  function armPostcode(data) {
+    const result = data.result;
+    if (!result || typeof result.zonecode !== 'string') return;
+    releasePostcode();
+    postcodeJob = { token: data.token, result };
+    if (window.daum && window.daum.Postcode) {
+      installPostcodeHook(window.daum);
+    } else {
+      // 우편번호 스크립트가 아직 로드되지 않았다면 로드되는 시점에 가로챈다.
+      const timer = setInterval(() => {
+        if (!postcodeJob) return clearInterval(timer);
+        if (window.daum && window.daum.Postcode) {
+          clearInterval(timer);
+          installPostcodeHook(window.daum);
+        }
+      }, 50);
+    }
+    postcodeTimer = setTimeout(releasePostcode, ARM_TIMEOUT_MS);
+    post('postcode-armed', data.token);
+  }
+
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (event.source !== window || !data || data.source !== SOURCE) return;
     if (data.type === 'arm') arm(data);
     else if (data.type === 'watch') watch(data);
     else if (data.type === 'unwatch') unwatch(data);
+    else if (data.type === 'arm-postcode') armPostcode(data);
   });
 })();

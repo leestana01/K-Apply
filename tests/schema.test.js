@@ -46,3 +46,20 @@ test('sanitizeProfile: 학력의 본교/분교 구분', () => {
   assert.equal(profile.educations[0].campusType, '본교');
   assert.equal(profile.educations[1].campusType, '');
 });
+
+test('sanitizeProfile: 주소·학력·병역·경력 확장 항목', () => {
+  const profile = schema.sanitizeProfile({
+    basic: { postalCode: '06236', address: '서울특별시 강남구 테헤란로 152', jibunAddress: '서울특별시 강남구 역삼동 737' },
+    military: { serviceType: '현역병', specialty: '보병' },
+    educations: [{ school: '서울대학교', region: '서울', entryType: '편입', dayNight: '야간' }, { region: '화성' }],
+    careers: [{ company: 'A', salary: '5000' }],
+    languages: [{ test: 'TOEIC', issuer: 'ETS' }],
+  });
+  assert.equal(profile.basic.jibunAddress, '서울특별시 강남구 역삼동 737');
+  assert.equal(profile.military.serviceType, '현역병');
+  assert.equal(profile.educations[0].region, '서울');
+  assert.equal(profile.educations[0].entryType, '편입');
+  assert.equal(profile.educations[1].region, '');
+  assert.equal(profile.careers[0].salary, '5000');
+  assert.equal(profile.languages[0].issuer, 'ETS');
+});

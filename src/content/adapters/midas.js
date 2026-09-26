@@ -128,28 +128,49 @@
     }
   }
 
+  /**
+   * 주소: 사이트의 주소 검색(postcodify)으로 검색해 우편번호·도로명 주소가 정확히 같은 결과를 고른다.
+   * 검색 창을 찾지 못한 경우에만 저장된 값을 직접 입력하고 "확인 필요"로 알린다.
+   * (postcodify도 결과를 고르면 같은 칸에 주소 문자열과 우편번호만 넣는다.)
+   */
   async function fillAddress(session) {
     const zip = byName('currentAddress.zipCode');
     const address = byName('currentAddress.address');
     const detail = byName('currentAddress.detailAddress');
     if (!zip || !address) return;
-    const values = [session.get('basic.postalCode'), session.get('basic.address'), session.get('basic.addressDetail')];
-    if (text.isBlank(values[0]) || text.isBlank(values[1])) {
-      if (!text.isBlank(values[1])) session.manual(SECTION_TITLE.basic, '주소', '우편번호가 없어 주소 검색으로 직접 입력해야 합니다.');
+    const target = { postalCode: session.get('basic.postalCode'), address: session.get('basic.address') };
+    const detailValue = session.get('basic.addressDetail');
+    const section = SECTION_TITLE.basic;
+    if (text.isBlank(target.postalCode) || text.isBlank(target.address)) {
+      if (!text.isBlank(target.address) || !text.isBlank(target.postalCode)) {
+        session.manual(section, '주소', '프로필에 우편번호와 도로명 주소가 모두 있어야 합니다. 옵션 화면의 [주소 검색]으로 입력해 주세요.');
+      }
       return;
     }
-    await session.apply({
-      section: SECTION_TITLE.basic,
+    const subject = address.closest('.subject') || document;
+    const opener = [...subject.querySelectorAll('button, a')].find((node) => /우편\s*번호|주소\s*(검색|찾기)/.test(dom.textOf(node)));
+    const status = await session.apply({
+      section,
       label: '주소',
-      value: values.join(' '),
+      value: target.address,
       filled: controls.hasValue(address),
       run: async () => {
-        await controls.fillText(zip, values[0]);
-        await controls.fillText(address, values[1]);
-        if (detail && values[2]) await controls.fillText(detail, values[2]);
-        return controls.hasValue(address);
+        const outcome = await controls.fillPostcodify(opener, target);
+        if (outcome === null) {
+          await controls.fillText(zip, text.digitsOnly(target.postalCode));
+          await controls.fillText(address, target.address);
+          const ok = controls.hasValue(address) && controls.hasValue(zip);
+          return ok ? { ok: true, review: '주소 검색 창을 찾지 못해 저장된 주소를 직접 입력했습니다. 표기를 확인해 주세요.' } : false;
+        }
+        if (!outcome.ok) return outcome;
+        const zipOk = text.digitsOnly(zip.value) === text.digitsOnly(target.postalCode);
+        const addressOk = controls.addressKey(address.value) === controls.addressKey(target.address);
+        return zipOk && addressOk ? { ok: true } : { ok: false, reason: '선택한 주소가 반영되지 않았습니다.' };
       },
     });
+    if (detail && detailValue && status !== STATUS.FAILED) {
+      await session.apply({ section, label: '상세 주소', value: detailValue, filled: controls.hasValue(detail), run: () => controls.fillText(detail, detailValue) });
+    }
   }
 
   async function fillMilitary(session) {
@@ -170,6 +191,7 @@
     const plan = [
       ['military.militaryBranchCode', '군별', { choice: [military.branch] }],
       ['military.militaryPositionCode', '계급', { choice: [military.rank] }],
+      ['military.militaryRole', '병과', { text: military.specialty }],
       ['military.militaryStartDate', '입대일', { date: military.startDate }],
       ['military.militaryEndDate', '전역일', { date: military.endDate }],
       ['military.militaryDischargeCode', '제대 구분', { choice: [military.discharge] }],
@@ -351,6 +373,8 @@
       ['highschool.entranceDate', '입학', { date: entry.startDate }],
       ['highschool.graduationDate', '졸업', { date: entry.endDate }],
       ['highschool.graduationTypeCode', '졸업 구분', { choice: [entry.status] }],
+      ['highschool.locationCode', '소재지', { choice: [entry.region] }],
+      ['highschool.dayOrNight', '주간/야간', { choice: [entry.dayNight] }],
     ];
     for (const [name, label, spec] of plan) {
       if (specEmpty(spec)) continue;
@@ -375,6 +399,8 @@
       ['search:college', '학교명', { text: entry.school, lookup: { campus: entry.campus, reviewDirect: true } }],
       ['degreeTypeCode', '학위', { choice: DEGREE[entry.level] || [] }],
       ['headOrBranch', '본교/분교', { choice: [entry.campusType] }],
+      ['locationCode', '소재지', { choice: [entry.region] }],
+      ['entranceTypeCode', '입학 구분', { choice: [entry.entryType] }],
       ['entranceDate', '입학', { date: entry.startDate }],
       ['graduationDate', '졸업', { date: entry.endDate }],
       ['graduationTypeCode', '졸업 구분', { choice: [entry.status] }],
@@ -400,6 +426,16 @@
     }
     const type = majorRow.querySelector('select[name$=".majorTypeCode"]');
     if (type && !type.disabled) await controls.fillSelect(type, ['주전공', '전공']);
+    const dayNight = majorRow.querySelector('select[name$=".dayOrNight"]');
+    if (dayNight && !dayNight.disabled && entry.dayNight) {
+      await session.apply({
+        section: title,
+        label: `${title} ${index + 1} · 주간/야간`,
+        value: entry.dayNight,
+        filled: controls.hasValue(dayNight),
+        run: () => controls.fillSelect(dayNight, [entry.dayNight]),
+      });
+    }
     if (entry.minor || entry.doubleMajor) {
       session.manual(title, `${title} ${index + 1} · 부/복수전공`, '부전공·복수전공은 [+] 버튼으로 전공 행을 추가해 직접 입력해 주세요.');
     }
@@ -442,6 +478,7 @@
         ['position', '직급', { text: e.position }],
         ['assignedTask', '담당 업무', { text: e.duties }],
         ['retirementReason', '퇴직 사유', { text: e.resignReason }],
+        ['salary', '연봉', { text: text.digitsOnly(e.salary) }],
       ],
     },
     {
@@ -514,7 +551,7 @@
       source: 'activities',
       filter: (e) => e.type !== '봉사활동' && e.type !== '해외경험',
       plan: (e) => [
-        ['activityCategorySn', '활동 구분', { choice: [e.type] }],
+        ['activityCategorySn', '활동 구분', { choice: text.candidatesFor('activityType', e.type) }],
         ['organization', '기관', { text: orName(e) }],
         ['startDate', '시작', { date: e.startDate }],
         ['endDate', '종료', { date: e.endDate }],

@@ -76,6 +76,18 @@ K-Apply는 빌드 도구와 런타임 의존성이 없는 Manifest V3 확장프�
 | 나인하이어 | 입력값을 넣은 뒤 입력 영역을 클릭해 드롭다운을 열어야 코드 검색 API가 호출됨 |
 | 마이다스인 | 검색창 Enter(`keypress`) → 결과 버튼(`data-code`) 또는 "직접 등록하기" |
 
+## 주소 입력
+
+주소는 값을 직접 써 넣지 않고 각 사이트의 주소 검색을 거칩니다. 사이트가 저장하는 값(장소 ID·좌표 등)이 검색 결과에서만 만들어지기 때문입니다.
+
+| 솔루션 | 구현 |
+| --- | --- |
+| 그리팅 | "주소 찾기" → 모달 검색창(`type=search`)에 도로명 주소 입력 → Enter(Google Places) → 결과 중 `주소…우편번호NNNNN` 텍스트가 프로필과 모두 같은 항목 클릭 → 읽기 전용 칸의 값 검증 |
+| 나인하이어 | 브리지 `arm-postcode`: 다음 1회 `new daum.Postcode(options)`를 가로채 위젯 대신 `options.oncomplete({ zonecode, roadAddress, jibunAddress, … })` 호출 → 화면 반영 확인 → 상세 주소 입력 |
+| 마이다스인 | "우편번호" → postcodify 검색창에 도로명 주소 입력 → 결과 중 `.code5`·`.address_info`가 모두 같은 항목 선택. 검색 창을 찾지 못하면 값을 직접 입력하고 "확인 필요" |
+
+옵션 화면의 주소 검색은 postcodify 공개 API(`api.poesis.kr`, 예비 `api.poesis.co.kr`)를 호출합니다. 원격 코드는 불러오지 않고 JSON만 받습니다.
+
 ## 파일 첨부와 업로드 검증
 
 ```

@@ -359,6 +359,24 @@
     return { ok: true };
   }
 
+  /**
+   * 카카오 우편번호 위젯을 여는 버튼을 누르되, 위젯 대신 저장된 주소로 선택 결과를 전달한다.
+   * @param {HTMLElement} trigger 주소 검색 버튼
+   * @param {{zonecode:string, roadAddress:string, jibunAddress:string}} result
+   */
+  async function postcodeViaBridge(trigger, result) {
+    if (!(await ensureBridge())) return { ok: false, reason: '주소 입력 모듈을 불러오지 못했습니다.' };
+    const token = crypto.randomUUID();
+    const armed = waitForBridgeMessage('postcode-armed', token, 1500);
+    postToBridge({ type: 'arm-postcode', token, result });
+    if (!(await armed)) return { ok: false, reason: '주소 입력 모듈이 응답하지 않습니다.' };
+    const consumed = waitForBridgeMessage('postcode-consumed', token, 5000);
+    trigger.click();
+    if (!(await consumed)) return { ok: false, reason: '주소 검색 창(카카오 우편번호)이 열리지 않았습니다.' };
+    await dom.sleep(300);
+    return { ok: true };
+  }
+
   // ---------------------------------------------------------------------------
   // 실행 진입점
   // ---------------------------------------------------------------------------
@@ -385,5 +403,5 @@
     return { ok: true, platform: detected.id, platformName: detected.name, report: session.report.toJSON() };
   }
 
-  KApply.engine = { STATUS, Session, Report, run, toOutcome, uploadTimeout };
+  KApply.engine = { STATUS, Session, Report, run, toOutcome, uploadTimeout, postcodeViaBridge };
 })();

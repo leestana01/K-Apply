@@ -11,6 +11,7 @@
   if (KApply.schema) return;
 
   const MONTH_HINT = '예: 2020-03';
+  const REGIONS = ['서울', '경기', '인천', '강원', '충북', '충남', '대전', '세종', '전북', '전남', '광주', '경북', '경남', '대구', '울산', '부산', '제주', '해외'];
 
   const SECTIONS = [
     {
@@ -34,8 +35,15 @@
           ],
         },
         { key: 'nationality', label: '국적', type: 'text', placeholder: '대한민국' },
-        { key: 'postalCode', label: '우편번호', type: 'text', placeholder: '06236' },
-        { key: 'address', label: '주소', type: 'text', placeholder: '서울특별시 강남구 테헤란로 000' },
+        {
+          key: 'postalCode',
+          label: '우편번호',
+          type: 'text',
+          placeholder: '06236',
+          hint: '아래 [주소 검색]으로 입력하면 지원서의 주소 검색 결과와 정확히 맞출 수 있습니다.',
+        },
+        { key: 'address', label: '도로명 주소', type: 'text', placeholder: '서울특별시 강남구 테헤란로 152' },
+        { key: 'jibunAddress', label: '지번 주소', type: 'text', placeholder: '서울특별시 강남구 역삼동 737' },
         { key: 'addressDetail', label: '상세 주소', type: 'text', placeholder: '000동 000호' },
       ],
     },
@@ -84,8 +92,22 @@
             ['복무중', '복무 중'],
           ],
         },
+        {
+          key: 'serviceType',
+          label: '복무 구분',
+          type: 'select',
+          options: [
+            ['', '선택 안 함'],
+            ['현역병', '현역병'],
+            ['상근예비역', '상근예비역'],
+            ['공익근무요원', '공익근무요원(사회복무요원)'],
+            ['전문연구요원', '전문연구요원'],
+            ['산업기능요원', '산업기능요원'],
+          ],
+        },
         { key: 'branch', label: '군별', type: 'text', placeholder: '육군' },
         { key: 'rank', label: '계급', type: 'text', placeholder: '병장' },
+        { key: 'specialty', label: '병과', type: 'text', placeholder: '보병' },
         { key: 'startDate', label: '입대일', type: 'date' },
         { key: 'endDate', label: '전역일', type: 'date' },
         { key: 'discharge', label: '제대 구분', type: 'text', placeholder: '만기제대' },
@@ -148,8 +170,33 @@
             ['', '선택 안 함'],
             ['본교', '본교'],
             ['분교', '분교'],
+            ['제2캠퍼스', '제2캠퍼스'],
           ],
           hint: '이원화 캠퍼스(예: 한국외국어대학교 글로벌캠퍼스)는 본교입니다. 본교·분교를 따로 묻는 지원서에 사용합니다.',
+        },
+        {
+          key: 'region',
+          label: '소재지',
+          type: 'select',
+          options: [['', '선택 안 함'], ...REGIONS.map((region) => [region, region])],
+        },
+        {
+          key: 'entryType',
+          label: '입학 구분',
+          type: 'select',
+          options: [
+            ['입학', '입학'],
+            ['편입', '편입'],
+          ],
+        },
+        {
+          key: 'dayNight',
+          label: '주간 / 야간',
+          type: 'select',
+          options: [
+            ['주간', '주간'],
+            ['야간', '야간'],
+          ],
         },
         { key: 'major', label: '전공', type: 'text', placeholder: '컴퓨터공학과' },
         { key: 'minor', label: '부전공', type: 'text' },
@@ -211,7 +258,8 @@
         { key: 'endDate', label: '퇴사', type: 'month', hint: '재직 중이면 비워 두세요.' },
         { key: 'current', label: '재직 중', type: 'checkbox' },
         { key: 'duties', label: '담당 업무', type: 'textarea' },
-        { key: 'resignReason', label: '퇴직 사유', type: 'text' },
+        { key: 'salary', label: '연봉(만원)', type: 'number', placeholder: '4000' },
+        { key: 'resignReason', label: '퇴직(이직) 사유', type: 'text', hint: '재직 중이어도 이직 사유를 필수로 묻는 지원서가 있습니다.' },
       ],
     },
     {
@@ -244,8 +292,10 @@
           type: 'select',
           options: [
             ['대외활동', '대외활동'],
+            ['교내활동', '교내활동'],
             ['동아리', '동아리'],
             ['봉사활동', '봉사활동'],
+            ['인턴', '인턴'],
             ['해외경험', '해외경험'],
             ['기타', '기타'],
           ],
@@ -283,6 +333,7 @@
       fields: [
         { key: 'language', label: '언어', type: 'text', placeholder: '영어' },
         { key: 'test', label: '시험명', type: 'text', placeholder: 'TOEIC' },
+        { key: 'issuer', label: '주관 기관', type: 'text', placeholder: 'ETS / YBM' },
         { key: 'score', label: '점수', type: 'text', placeholder: '900' },
         { key: 'grade', label: '등급', type: 'text', placeholder: 'IH' },
         { key: 'date', label: '취득일', type: 'date' },
@@ -399,6 +450,7 @@
 
   KApply.schema = {
     SECTIONS,
+    REGIONS,
     SECTION_BY_ID,
     FILE_SLOTS,
     MAX_FILE_BYTES,

@@ -136,3 +136,17 @@ test('matchListed: 이원화 캠퍼스(한국외국어대학교 글로벌)', () 
   // 학교명에 캠퍼스를 붙이면 어느 목록에서도 찾지 못한다.
   assert.equal(text.matchListed(greeting, '한국외국어대학교 글로벌캠퍼스').index, -1);
 });
+
+test('candidatesFor: 활동 구분 동의어', () => {
+  const options = ['교내활동', '동아리활동', '교육이수', '인턴', '기타'];
+  assert.equal(options[text.pickOption(options, text.candidatesFor('activityType', '동아리'))], '동아리활동');
+  assert.equal(options[text.pickOption(options, text.candidatesFor('activityType', '인턴'))], '인턴');
+  // 선택지에 없는 구분은 비슷한 값으로 대체하지 않는다.
+  assert.equal(text.pickOption(options, text.candidatesFor('activityType', '대외활동')), -1);
+});
+
+test('candidatesFor: 병역 구분은 사이트별 표기를 맞춘다', () => {
+  const ninehire = ['군필', '복무중', '병역면제', '미필', '해당없음'];
+  assert.equal(ninehire[text.pickOption(ninehire, text.candidatesFor('militaryStatus', '면제'))], '병역면제');
+  assert.equal(ninehire[text.pickOption(ninehire, text.candidatesFor('militaryStatus', '비대상'))], '해당없음');
+});

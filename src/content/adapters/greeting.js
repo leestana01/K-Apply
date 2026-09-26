@@ -16,6 +16,7 @@
 
   const FIELD_ROOT = '[data-scope="field"][data-part="root"]';
   const LC = 'languagesCertificationsAndOtherActivity';
+  const MS = 'militaryServicePreferentialEmploymentStatus';
 
   const SECTION_TITLE = {
     basic: '기본 정보',
@@ -34,12 +35,22 @@
     'basicInformation.gender': 'basic.gender',
     'basicInformation.birthdate': 'basic.birthdate',
     'basicInformation.nationalityCode': 'basic.nationality',
-    'personalInformation.currentAddress.postalCode': 'basic.postalCode',
-    'personalInformation.currentAddress.address': 'basic.address',
-    'personalInformation.currentAddress.detailedAddress': 'basic.addressDetail',
     'applicationDetail.applicationSource': 'application.source',
     'applicationDetail.desiredSalary.salary': 'application.desiredSalary',
+    // 병역: 병역 구분을 고르면 나머지 항목이 나타난다(fill()에서 두 번 훑는다).
+    [`${MS}.militaryService.militaryServiceStatus`]: 'military.status',
+    [`${MS}.militaryService.militaryServiceClassification`]: 'military.serviceType',
+    [`${MS}.militaryService.branchOfService`]: 'military.branch',
+    [`${MS}.militaryService.rank`]: 'military.rank',
+    [`${MS}.militaryService.militaryOccupationalSpecialty`]: 'military.specialty',
+    [`${MS}.militaryService.servicePeriod.startDate`]: 'military.startDate',
+    [`${MS}.militaryService.servicePeriod.endDate`]: 'military.endDate',
+    [`${MS}.militaryService.dischargeType`]: 'military.discharge',
+    [`${MS}.militaryService.reasonForExemption`]: 'military.exemptionReason',
   };
+
+  /** 전용 흐름(주소 검색)이 처리하는 항목 */
+  const ADDRESS_PREFIX = 'personalInformation.';
 
   const isUniversity = (entry) => entry.level === 'university' || entry.level === 'college';
   const isGraduate = (entry) => entry.level === 'master' || entry.level === 'doctor';
@@ -51,6 +62,12 @@
   const coded = (value, lookup = {}) => (value ? { text: value, lookup: { reviewDirect: true, ...lookup } } : '');
   /** 학교명: 캠퍼스까지 맞는 코드 항목을 고른다. */
   const school = (entry) => coded(entry.school, { campus: entry.campus });
+  /** 기간이 시작~종료 한 칸(범위 선택기)으로 나온 공고용 값 */
+  const period = (start, end) => (start ? { range: [start, end].filter(Boolean) } : '');
+  /** 선택형 값 (비어 있으면 건너뜀) */
+  const choice = (value) => (value ? { choice: [value] } : '');
+  /** 대학 "학위구분" 토글 */
+  const DEGREE_TOGGLE = { university: '학사', college: '전문학사' };
 
   /**
    * 반복 섹션 정의. fields의 값은 (entry) => 값 | { choice: 후보배열 } | { checked: boolean }
@@ -66,10 +83,13 @@
       key: 'schoolName',
       fields: {
         schoolName: school,
+        schoolLocation: (e) => choice(e.region),
         completionStatus: (e) => ({ choice: [e.status] }),
         'enrollmentPeriod.startDate': (e) => e.startDate,
         'enrollmentPeriod.endDate': (e) => e.endDate,
+        enrollmentPeriod: (e) => period(e.startDate, e.endDate),
       },
+      toggles: [{ test: /주\s*\/?\s*야간/, value: (e) => e.dayNight, label: '주/야간 구분' }],
     },
     {
       base: 'educationalBackground.universities',
@@ -79,14 +99,22 @@
       key: 'schoolName',
       fields: {
         schoolName: school,
+        schoolLocation: (e) => choice(e.region),
+        mainCampusBranchCampus: (e) => choice(e.campusType),
         'enrollmentPeriod.startDate': (e) => e.startDate,
         'enrollmentPeriod.endDate': (e) => e.endDate,
+        enrollmentPeriod: (e) => period(e.startDate, e.endDate),
         completionStatus: (e) => ({ choice: [e.status] }),
         'gpa.scoreScale': (e) => (e.gpa ? { choice: [e.gpaScale] } : ''),
         'gpa.score': (e) => e.gpa,
         'majors.0.majorClassification': (e) => (e.major ? { choice: ['주전공'] } : ''),
         'majors.0': (e) => coded(e.major),
       },
+      toggles: [
+        { test: /학위\s*구분/, value: (e) => DEGREE_TOGGLE[e.level] || '', label: '학위구분' },
+        { test: /입학\s*구분/, value: (e) => e.entryType, label: '입학구분' },
+        { test: /주\s*\/?\s*야간/, value: (e) => e.dayNight, label: '주/야간 구분' },
+      ],
     },
     {
       base: 'educationalBackground.graduateSchools',
@@ -97,14 +125,21 @@
       fields: {
         degreeLevel: (e) => ({ choice: text.candidatesFor('graduateDegree', e.level) }),
         schoolName: school,
+        schoolLocation: (e) => choice(e.region),
+        mainCampusBranchCampus: (e) => choice(e.campusType),
         'enrollmentPeriod.startDate': (e) => e.startDate,
         'enrollmentPeriod.endDate': (e) => e.endDate,
+        enrollmentPeriod: (e) => period(e.startDate, e.endDate),
         completionStatus: (e) => ({ choice: [e.status] }),
         'gpa.scoreScale': (e) => (e.gpa ? { choice: [e.gpaScale] } : ''),
         'gpa.score': (e) => e.gpa,
         'majors.0.majorClassification': (e) => (e.major ? { choice: ['주전공'] } : ''),
         'majors.0': (e) => coded(e.major),
       },
+      toggles: [
+        { test: /입학\s*구분/, value: (e) => e.entryType, label: '입학구분' },
+        { test: /주\s*\/?\s*야간/, value: (e) => e.dayNight, label: '주/야간 구분' },
+      ],
     },
     {
       base: 'workHistory.workExperiences',
@@ -117,10 +152,12 @@
         'employmentPeriod.startDate': (e) => e.startDate,
         employmentStatus: (e) => ({ checked: e.current === true }),
         'employmentPeriod.endDate': (e) => (e.current ? '' : e.endDate),
+        employmentPeriod: (e) => period(e.startDate, e.current ? '' : e.endDate),
         department: (e) => e.department,
         positionRank: (e) => e.position,
         dutiesResponsibility: (e) => e.duties,
         reasonForResignation: (e) => e.resignReason,
+        annualSalary: (e) => text.digitsOnly(e.salary),
       },
     },
     {
@@ -135,6 +172,7 @@
         roleParticipationRole: (e) => e.role,
         'projectPeriod.startDate': (e) => e.startDate,
         'projectPeriod.endDate': (e) => e.endDate,
+        projectPeriod: (e) => period(e.startDate, e.endDate),
         contribution: (e) => e.contribution,
         projectDescription: (e) => [e.description, e.url].filter(Boolean).join('\n'),
       },
@@ -146,11 +184,12 @@
       filter: isExtracurricular,
       key: 'institutionOrganizationName',
       fields: {
-        activityClassification: (e) => ({ choice: [e.type] }),
+        activityClassification: (e) => ({ choice: text.candidatesFor('activityType', e.type) }),
         institutionOrganizationName: orName,
         role: (e) => e.role,
         'activityPeriod.startDate': (e) => e.startDate,
         'activityPeriod.endDate': (e) => e.endDate,
+        activityPeriod: (e) => period(e.startDate, e.endDate),
         activityDescription: describe,
       },
     },
@@ -164,6 +203,7 @@
         hostOrganization: orName,
         'activityPeriod.startDate': (e) => e.startDate,
         'activityPeriod.endDate': (e) => e.endDate,
+        activityPeriod: (e) => period(e.startDate, e.endDate),
         volunteerHours: (e) => e.hours,
         serviceDescription: describe,
       },
@@ -178,6 +218,7 @@
         educationalInstitution: (e) => e.institution,
         'completionPeriod.startDate': (e) => e.startDate,
         'completionPeriod.endDate': (e) => e.endDate,
+        completionPeriod: (e) => period(e.startDate, e.endDate),
         trainingHours: (e) => e.hours,
         mainContent: (e) => e.description,
       },
@@ -267,7 +308,7 @@
       case 'select':
         return controls.fillArkSelect(element, value.choice || []);
       case 'date':
-        return controls.fillArkDate(element, value.text);
+        return controls.fillArkDate(element, value.range || value.text);
       case 'checkbox':
         return controls.fillCheckbox(element, value.checked === true);
       case 'radio':
@@ -285,6 +326,7 @@
     if (spec === undefined || spec === null || spec === '') return true;
     if (typeof spec !== 'object') return false;
     if ('checked' in spec) return false;
+    if ('range' in spec) return !spec.range.length;
     return (!spec.choice || spec.choice.filter(Boolean).length === 0) && text.isBlank(spec.text);
   }
 
@@ -321,11 +363,15 @@
     );
   }
 
-  async function fillSingles(session) {
-    const handled = new Set();
+  /**
+   * 단일 항목을 채운다. 병역처럼 선택에 따라 새 항목이 나타나는 경우를 위해
+   * 같은 handled 집합으로 여러 번 호출할 수 있다.
+   */
+  async function fillSingles(session, handled = new Set()) {
     for (const element of formControls()) {
       const name = element.getAttribute('name') || '';
       if (LIST_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
+      if (name.startsWith(ADDRESS_PREFIX)) continue;
       const kind = kindOf(element);
       const label = fieldLabel(element);
       // 긴 서술형 질문(자기소개서 등)은 채우지 않는다.
@@ -414,6 +460,142 @@
           run: () => setControl(element, kind, spec),
         });
       }
+      await fillEntryToggles(session, list, index, entry, label);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 토글 버튼 그룹 (비대상|대상, 전문학사|학사, 입학|편입, 주간|야간)
+  // ---------------------------------------------------------------------------
+
+  const TOGGLE_GROUP = '[data-scope="toggle-group"][data-part="root"]';
+  const FILE_TOGGLE = /^(파일|URL)$/i;
+
+  function toggleLabel(group) {
+    let node = group;
+    for (let depth = 0; depth < 5 && node; depth += 1) {
+      node = node.parentElement;
+      const label = node && [...node.querySelectorAll('label')].find((candidate) => !group.contains(candidate) && dom.textOf(candidate));
+      if (label) return text.cleanLabel(label.textContent);
+    }
+    return '';
+  }
+
+  function isFileToggle(group) {
+    return [...group.querySelectorAll('[data-part="item"]')].some((item) => FILE_TOGGLE.test(dom.textOf(item)));
+  }
+
+  function toggleSelected(group) {
+    return !!group.querySelector('[data-part="item"][data-state="on"]');
+  }
+
+  /**
+   * 반복 항목 i번째 행(또는 고등학교처럼 단일 항목)을 감싸는 가장 큰 컨테이너.
+   * 같은 섹션의 다른 행·다른 항목(예: 대학원)을 포함하기 직전까지 올라간다.
+   */
+  function entryContainer(list, index) {
+    const prefix = entryPrefix(list, index);
+    const anchor = document.querySelector(`[name^="${CSS.escape(prefix)}"]`);
+    if (!anchor) return null;
+    const sectionRoot = list.base.split('.')[0] + '.';
+    const selector = `[name^="${CSS.escape(sectionRoot)}"]:not([name^="${CSS.escape(prefix)}"])`;
+    let node = anchor;
+    while (node.parentElement && node.parentElement !== document.body && !node.parentElement.querySelector(selector)) {
+      node = node.parentElement;
+    }
+    return node;
+  }
+
+  async function fillEntryToggles(session, list, index, entry, rowLabel) {
+    if (!list.toggles) return;
+    const container = entryContainer(list, index);
+    if (!container) return;
+    const groups = [...container.querySelectorAll(TOGGLE_GROUP)].filter((group) => !isFileToggle(group));
+    for (const rule of list.toggles) {
+      const group = groups.find((candidate) => rule.test.test(toggleLabel(candidate)));
+      if (!group) continue;
+      const value = rule.value(entry);
+      if (!value) {
+        if (!toggleSelected(group)) session.manual(list.title, `${rowLabel} · ${rule.label}`, `프로필에 ${rule.label} 값이 없어 선택하지 않았습니다. 직접 선택해 주세요.`);
+        continue;
+      }
+      await session.apply({
+        section: list.title,
+        label: `${rowLabel} · ${rule.label}`,
+        value,
+        filled: toggleSelected(group),
+        run: () => controls.fillToggleGroup(group, [value]),
+      });
+    }
+  }
+
+  /** 섹션에 속하지 않는 단일 토글(장애여부·보훈여부 등) */
+  async function fillSingleToggles(session) {
+    const groups = [...document.querySelectorAll(TOGGLE_GROUP)].filter((group) => {
+      if (isFileToggle(group)) return false;
+      const root = group.closest('[data-scope="field"][data-part="root"]') || group.parentElement;
+      return !root || !LIST_PREFIXES.some((prefix) => root.querySelector(`[name^="${CSS.escape(prefix)}"]`));
+    });
+    for (const group of groups) {
+      const label = toggleLabel(group);
+      const path = matcher.matchField(label);
+      if (!path) continue;
+      const value = session.get(path);
+      if (text.isBlank(value)) continue;
+      await session.apply({
+        section: SECTION_TITLE[path.split('.')[0]] || '기타',
+        label,
+        value,
+        filled: toggleSelected(group),
+        run: () => controls.fillToggleGroup(group, session.candidates(path)),
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 주소 (Google Places 검색 모달)
+  // ---------------------------------------------------------------------------
+
+  async function fillAddress(session) {
+    const postal = document.querySelector('[name="personalInformation.currentAddress.postalCode"]');
+    const address = document.querySelector('[name="personalInformation.currentAddress.address"]');
+    if (!postal || !address) return;
+    const target = { postalCode: session.get('basic.postalCode'), address: session.get('basic.address') };
+    const detail = session.get('basic.addressDetail');
+    const section = SECTION_TITLE.basic;
+    let container = postal.closest('[data-scope="field"][data-part="root"]');
+    while (container && !container.querySelector('button')) container = container.parentElement;
+    const opener = container && [...container.querySelectorAll('button')].find((button) => /주소\s*(찾기|검색)/.test(dom.textOf(button)));
+
+    if (text.isBlank(target.postalCode) || text.isBlank(target.address)) {
+      if (!text.isBlank(target.address) || !text.isBlank(target.postalCode)) {
+        session.manual(section, '현주소', '프로필에 우편번호와 도로명 주소가 모두 있어야 합니다. 옵션 화면의 [주소 검색]으로 입력해 주세요.');
+      }
+      return;
+    }
+    const status = await session.apply({
+      section,
+      label: '현주소',
+      value: target.address,
+      filled: controls.hasValue(postal),
+      run: async () => {
+        if (!opener) return { ok: false, reason: '주소 찾기 버튼을 찾지 못했습니다.' };
+        const outcome = await controls.fillGreetingAddress(opener, target);
+        if (!outcome.ok) return outcome;
+        const zipOk = text.digitsOnly(postal.value) === text.digitsOnly(target.postalCode);
+        const addressOk = controls.addressKey(address.value) === controls.addressKey(target.address);
+        return zipOk && addressOk ? { ok: true } : { ok: false, reason: '선택한 주소가 반영되지 않았습니다.' };
+      },
+    });
+    const detailInput = document.querySelector('[name="personalInformation.currentAddress.detailedAddress"]');
+    if (detailInput && detail && status !== KApply.engine.STATUS.FAILED) {
+      await session.apply({
+        section,
+        label: '상세 주소',
+        value: detail,
+        filled: controls.hasValue(detailInput),
+        run: () => controls.fillText(detailInput, detail),
+      });
     }
   }
 
@@ -505,7 +687,12 @@
   // ---------------------------------------------------------------------------
 
   async function fill(session) {
-    await fillSingles(session);
+    const handled = new Set();
+    await fillSingles(session, handled);
+    await fillSingleToggles(session);
+    await fillAddress(session);
+    // 병역 구분 선택 후 나타난 항목(복무 구분·군별·계급·기간 등)을 채운다.
+    await fillSingles(session, handled);
     for (const list of LISTS) {
       await fillList(session, list);
     }
