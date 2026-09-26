@@ -8,14 +8,33 @@
   const KApply = globalThis.KApply;
   if (KApply.engine) return;
 
-  const { dom, text, controls, storage } = KApply;
+  const { dom, text, storage } = KApply;
 
+  /**
+   * filled  : 입력 완료
+   * review  : 입력했지만 사용자가 확인해야 함 (목록에 없어 직접 입력, 캠퍼스 자동 선택 등)
+   * failed  : 입력하지 못함
+   * manual  : 사용자가 직접 해야 하는 항목
+   * skipped : 이미 값이 있어 건너뜀
+   */
   const STATUS = Object.freeze({
     FILLED: 'filled',
+    REVIEW: 'review',
     SKIPPED: 'skipped',
     FAILED: 'failed',
     MANUAL: 'manual',
   });
+
+  const DEFAULT_FAILURE = '선택지를 찾지 못했거나 입력이 거부됨';
+
+  /**
+   * 입력기의 반환값을 표준 형태로 바꾼다.
+   * boolean 또는 { ok, review?, reason?, detail? }
+   */
+  function toOutcome(value) {
+    if (value && typeof value === 'object') return value;
+    return { ok: value === true };
+  }
 
   const CHOICE_DICTIONARIES = {
     'basic.gender': 'gender',
@@ -48,6 +67,7 @@
         notices: this.notices,
         counts: {
           filled: this.count(STATUS.FILLED),
+          review: this.count(STATUS.REVIEW),
           skipped: this.count(STATUS.SKIPPED),
           failed: this.count(STATUS.FAILED),
           manual: this.count(STATUS.MANUAL),
@@ -61,7 +81,6 @@
       this.profile = profile;
       this.settings = settings;
       this.report = new Report();
-      this.fileCache = new Map();
     }
 
     /** 'basic.name' 형태의 경로로 단일 섹션 값을 읽는다. */
@@ -121,9 +140,17 @@
         return STATUS.SKIPPED;
       }
       try {
-        const ok = await run();
-        this.report.add(ok ? STATUS.FILLED : STATUS.FAILED, section, label, ok ? '' : '선택지를 찾지 못했거나 입력이 거부됨');
-        return ok ? STATUS.FILLED : STATUS.FAILED;
+        const outcome = toOutcome(await run());
+        if (!outcome.ok) {
+          this.report.add(STATUS.FAILED, section, label, outcome.reason || DEFAULT_FAILURE);
+          return STATUS.FAILED;
+        }
+        if (outcome.review) {
+          this.report.add(STATUS.REVIEW, section, label, outcome.review);
+          return STATUS.REVIEW;
+        }
+        this.report.add(STATUS.FILLED, section, label, outcome.detail || '');
+        return STATUS.FILLED;
       } catch (error) {
         this.report.add(STATUS.FAILED, section, label, error && error.message ? error.message : String(error));
         return STATUS.FAILED;
@@ -134,30 +161,126 @@
       this.report.add(STATUS.MANUAL, section, label, detail);
     }
 
-    async file(slot) {
-      if (!this.fileCache.has(slot)) this.fileCache.set(slot, await storage.loadFile(slot));
-      return this.fileCache.get(slot);
+    /** 등록된 첨부 파일의 메타데이터 (없으면 null) */
+    async fileMeta(slot) {
+      return (await storage.loadFileMeta())[slot] || null;
     }
 
     /**
-     * 첨부 파일을 올린다. input[type=file]이 DOM에 있으면 직접 넣고,
-     * 없으면(나인하이어처럼 클릭 시점에 임시 input을 만드는 경우) 페이지 브리지를 사용한다.
+     * 첨부 파일을 올리고 서버 수신까지 검증한다.
+     *
+     * 1. 저장된 파일의 크기·SHA-256을 검증한다. 등록돼 있는데 내용이 없거나 손상됐으면 실패로 보고한다.
+     * 2. 페이지 브리지에 업로드 감시를 등록한다.
+     * 3. input[type=file]에 직접 넣거나(그리팅), 업로드 버튼이 만드는 임시 input을 가로채 넣는다(나인하이어).
+     * 4. 실제 업로드 요청 본문의 크기·SHA-256이 원본과 같고 응답이 2xx일 때만 성공으로 본다.
+     * 5. 어댑터가 넘긴 confirm()으로 화면에 첨부 완료 상태가 표시됐는지 확인한다.
+     *
+     * @param {object} options
+     * @param {string} options.section
+     * @param {string} options.label
+     * @param {string} options.slot resume | portfolio | careerSummary
+     * @param {HTMLInputElement} [options.input]
+     * @param {HTMLElement} [options.trigger]
+     * @param {boolean} [options.filled]
+     * @param {(record:object) => (true|string)} [options.confirm] 화면 확인. 실패 시 사유 문자열
+     * @param {() => (string|null)} [options.rejected] 사이트가 파일을 거부했다고 표시하면 사유를 돌려준다(빠른 실패)
+     * @param {string} [options.hint] 업로드 칸의 안내 문구 (요구 형식 판별용)
      */
-    async applyFile({ section, label, slot, input, trigger, filled = false }) {
-      const record = await this.file(slot);
-      if (!record) return STATUS.SKIPPED;
+    async applyFile({ section, label, slot, input, trigger, filled = false, confirm, rejected, hint = '' }) {
+      const meta = (await storage.loadFileMeta())[slot];
+      if (!meta) return STATUS.SKIPPED;
       return this.apply({
         section,
         label,
-        value: record.name,
+        value: meta.name,
         filled,
         run: async () => {
-          if (input) return controls.fillFileInput(input, record);
-          if (trigger) return uploadViaBridge(trigger, record);
-          return false;
+          let record;
+          try {
+            record = await storage.loadFile(slot);
+          } catch (error) {
+            return { ok: false, reason: error.message };
+          }
+          if (!record) return { ok: false, reason: '저장된 파일을 찾을 수 없습니다. 옵션 화면에서 다시 등록해 주세요.' };
+          if (!input && !trigger) return { ok: false, reason: '파일 업로드 칸을 찾지 못했습니다.' };
+          const mismatch = text.fileFormatMismatch(record, { accept: input ? input.getAttribute('accept') || '' : '', hint });
+          if (mismatch) return { ok: false, reason: `'${record.name}': ${mismatch}` };
+
+          const upload = await watchUpload(record);
+          if (!upload) return { ok: false, reason: '업로드 검증 모듈을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.' };
+
+          let attached;
+          if (input) attached = await attachToInput(input, record);
+          else attached = await uploadViaBridge(trigger, record);
+          if (!attached.ok) {
+            upload.cancel();
+            return attached;
+          }
+
+          const result = await Promise.race([upload.result, watchRejection(rejected)]);
+          if (result.rejected) {
+            upload.cancel();
+            return { ok: false, reason: result.rejected };
+          }
+          if (!result.ok) {
+            return {
+              ok: false,
+              reason:
+                result.reason === 'timeout'
+                  ? '서버로 파일이 전송되는 것을 확인하지 못했습니다. 첨부 상태를 직접 확인해 주세요.'
+                  : `서버가 파일을 받지 않았습니다 (HTTP ${result.status || '오류'}). 파일 형식·용량을 확인해 주세요.`,
+            };
+          }
+          if (confirm) {
+            await dom.sleep(400);
+            const shown = confirm(record);
+            if (shown !== true) return { ok: false, reason: typeof shown === 'string' ? shown : '화면에 첨부 완료 상태가 표시되지 않았습니다.' };
+          }
+          return { ok: true, detail: `서버 업로드 확인 · ${formatBytes(record.size)} · SHA-256 일치` };
         },
       });
     }
+  }
+
+  /** 업로드를 기다리는 동안 사이트의 거부 표시를 감시한다. 거부되지 않으면 끝나지 않는다. */
+  function watchRejection(rejected) {
+    if (!rejected) return new Promise(() => {});
+    return new Promise((resolve) => {
+      const timer = setInterval(() => {
+        const reason = rejected();
+        if (reason) {
+          clearInterval(timer);
+          resolve({ rejected: reason });
+        }
+      }, 300);
+    });
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  }
+
+  function toFile(record) {
+    return new File([record.bytes], record.name, { type: record.type, lastModified: record.updatedAt || Date.now() });
+  }
+
+  /**
+   * input에 파일을 넣고, 들어간 파일이 원본과 같은지 확인한 뒤 변경 이벤트를 보낸다.
+   * 페이지가 change 처리 후 input을 비우는 경우가 있어 이벤트 전에 확인한다.
+   */
+  async function attachToInput(input, record) {
+    const transfer = new DataTransfer();
+    transfer.items.add(toFile(record));
+    input.files = transfer.files;
+    const attached = input.files && input.files[0];
+    if (!attached) return { ok: false, reason: '파일을 업로드 칸에 넣지 못했습니다.' };
+    const hash = await storage.sha256Hex(new Uint8Array(await attached.arrayBuffer()));
+    if (attached.size !== record.size || hash !== record.sha256) return { ok: false, reason: '업로드 칸에 들어간 파일이 원본과 다릅니다.' };
+    dom.fire(input, 'input');
+    dom.fire(input, 'change');
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------------------
@@ -166,11 +289,12 @@
 
   const BRIDGE_SOURCE = 'kapply-bridge';
 
+  /** 조건에 맞는 브리지 메시지를 기다린다. 시간이 지나면 null. */
   function waitForBridgeMessage(type, token, timeout) {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         window.removeEventListener('message', onMessage);
-        resolve(false);
+        resolve(null);
       }, timeout);
       function onMessage(event) {
         const data = event.data;
@@ -178,29 +302,61 @@
         if (data.type !== type || data.token !== token) return;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
-        resolve(true);
+        resolve(data);
       }
       window.addEventListener('message', onMessage);
     });
   }
 
-  async function uploadViaBridge(trigger, record) {
-    const injected = await chrome.runtime.sendMessage({ type: 'kapply:inject-bridge' });
-    if (!injected || !injected.ok) return false;
+  function postToBridge(message, transfer) {
+    window.postMessage({ source: BRIDGE_SOURCE, ...message }, location.origin, transfer || []);
+  }
+
+  async function ensureBridge() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'kapply:inject-bridge' });
+      return !!(response && response.ok);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /** 업로드 크기에 비례한 대기 시간 (최소 30초, 1MB당 5초 추가) */
+  function uploadTimeout(size) {
+    return 30000 + Math.ceil(size / (1024 * 1024)) * 5000;
+  }
+
+  /**
+   * 서버 업로드 감시를 시작한다.
+   * @returns {Promise<{result: Promise<{ok:boolean,status?:number,reason?:string}>, cancel: () => void}|null>}
+   */
+  async function watchUpload(record) {
+    if (!(await ensureBridge())) return null;
     const token = crypto.randomUUID();
-    const bytes = dom.base64ToBytes(record.data);
-    const armed = waitForBridgeMessage('armed', token, 1500);
-    window.postMessage(
-      { source: BRIDGE_SOURCE, type: 'arm', token, name: record.name, mime: record.type, buffer: bytes.buffer },
-      location.origin,
-      [bytes.buffer]
+    const timeoutMs = uploadTimeout(record.size);
+    const watching = waitForBridgeMessage('watching', token, 1500);
+    postToBridge({ type: 'watch', token, size: record.size, sha256: record.sha256, timeoutMs });
+    if (!(await watching)) return null;
+    const result = waitForBridgeMessage('upload-result', token, timeoutMs + 2000).then(
+      (data) => data || { ok: false, reason: 'timeout' }
     );
-    if (!(await armed)) return false;
+    return { result, cancel: () => postToBridge({ type: 'unwatch', token }) };
+  }
+
+  /**
+   * 업로드 버튼이 클릭 시점에 임시 input을 만드는 경우: 브리지가 다음 파일 선택 1회를 가로채 파일을 넣는다.
+   */
+  async function uploadViaBridge(trigger, record) {
+    if (!(await ensureBridge())) return { ok: false, reason: '파일 첨부 모듈을 불러오지 못했습니다.' };
+    const token = crypto.randomUUID();
+    const buffer = record.bytes.slice().buffer;
+    const armed = waitForBridgeMessage('armed', token, 1500);
+    postToBridge({ type: 'arm', token, name: record.name, mime: record.type, buffer }, [buffer]);
+    if (!(await armed)) return { ok: false, reason: '파일 첨부 모듈이 응답하지 않습니다.' };
     const consumed = waitForBridgeMessage('consumed', token, 4000);
     trigger.click();
-    const ok = await consumed;
-    await dom.sleep(800);
-    return ok;
+    if (!(await consumed)) return { ok: false, reason: '업로드 버튼이 파일 선택을 요청하지 않았습니다.' };
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------------------
@@ -229,5 +385,5 @@
     return { ok: true, platform: detected.id, platformName: detected.name, report: session.report.toJSON() };
   }
 
-  KApply.engine = { STATUS, Session, Report, run, uploadViaBridge };
+  KApply.engine = { STATUS, Session, Report, run, toOutcome, uploadTimeout };
 })();
