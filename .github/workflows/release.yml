@@ -1,0 +1,42 @@
+name: Release
+
+# GitHub에서 릴리스를 게시하면 해당 태그로 확장프로그램 패키지를 빌드해 릴리스 자산으로 첨부한다.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  attach-package:
+    name: 릴리스 패키지 첨부
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 태그와 manifest 버전 일치 확인
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          TAG="${{ github.event.release.tag_name }}"
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::태그($TAG)와 manifest 버전(v$VERSION)이 다릅니다."
+            exit 1
+          fi
+
+      - name: 테스트
+        run: npm test
+
+      - name: ZIP 패키지 생성
+        run: npm run package
+
+      - name: 릴리스에 첨부
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.zip --clobber
