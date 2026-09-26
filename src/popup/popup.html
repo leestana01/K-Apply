@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>K-Apply</title>
+    <link rel="stylesheet" href="../ui/tokens.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img src="../../icons/icon-32.png" alt="" width="20" height="20" />
+      <strong>K-Apply</strong>
+      <button id="open-options" class="link-button" type="button">프로필 편집</button>
+    </header>
+
+    <main>
+      <section class="card status" id="status" aria-live="polite">
+        <span class="status-dot" id="status-dot"></span>
+        <div>
+          <div class="status-title" id="status-title">현재 페이지 확인 중…</div>
+          <div class="status-desc muted" id="status-desc"></div>
+        </div>
+      </section>
+
+      <button id="fill" class="btn btn-primary fill" type="button" disabled>지원서 자동 입력</button>
+      <p class="hint muted">단축키 <kbd id="shortcut">Alt+Shift+F</kbd> · 제출 버튼은 누르지 않습니다.</p>
+
+      <section class="card profile" id="profile-summary"></section>
+
+      <section class="card result" id="result" hidden></section>
+    </main>
+
+    <script src="../shared/text.js"></script>
+    <script src="../shared/schema.js"></script>
+    <script src="../shared/storage.js"></script>
+    <script src="../shared/platforms.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
