@@ -18,8 +18,8 @@ K-Apply에 관심을 가져 주셔서 감사합니다. 버그 제보, 새 채용
 ```bash
 git clone https://github.com/leestana01/K-Apply.git
 cd K-Apply
-npm test
-npm run check
+npm ci
+npm run verify   # lint + test + check
 ```
 
 1. `chrome://extensions` → 개발자 모드 → **압축해제된 확장 프로그램을 로드합니다** → 저장소 폴더 선택
@@ -28,12 +28,13 @@ npm run check
 
 ## 코드 규칙
 
-- 런타임 의존성과 빌드 단계를 추가하지 않습니다. 모든 파일은 브라우저에서 그대로 실행됩니다.
+- 런타임 의존성과 빌드 단계를 추가하지 않습니다. 모든 파일은 브라우저에서 그대로 실행됩니다. (개발 도구는 ESLint만 사용합니다.)
 - 각 파일은 `globalThis.KApply`에 모듈을 등록하는 IIFE 형태를 유지합니다.
 - 들여쓰기 2칸, 작은따옴표, 세미콜론 사용 (`.editorconfig` 참고).
 - 사용자에게 보이는 문구와 주석은 한국어로 작성합니다.
 - DOM에 의존하지 않는 로직은 `src/shared/`에 두고 `tests/`에 단위 테스트를 추가합니다.
-- 제출·동의·비밀번호 입력 등 사용자의 의사 확인이 필요한 동작은 자동화하지 않습니다.
+- 제출·동의·비밀번호 입력, 이미 첨부된 파일 삭제 등 사용자의 의사 확인이 필요한 동작은 자동화하지 않습니다.
+- 확실하지 않으면 추측해서 채우지 말고 `failed` 또는 `review`로 알립니다. 특히 파일은 서버 수신이 확인된 경우에만 성공으로 표시합니다.
 
 ## 커밋 메시지
 
@@ -59,7 +60,7 @@ feat(ninehire): 어학 하위 입력 폼 지원
 ## Pull Request
 
 1. `main`에서 브랜치를 만듭니다. (`feat/…`, `fix/…`, `docs/…`)
-2. `npm test`와 `npm run check`를 통과시킵니다.
+2. `npm run verify`(lint · test · check)를 통과시킵니다.
 3. 어댑터를 수정했다면 공개 공고의 지원서 화면에서 **제출하지 않고** 확인한 결과를 PR 템플릿의 표에 적습니다.
 4. 사용자에게 보이는 변경은 `CHANGELOG.md`의 `Unreleased`에 추가합니다.
 
