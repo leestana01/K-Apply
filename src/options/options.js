@@ -112,6 +112,91 @@
     return parts.length ? parts.join(' · ') : `${section.itemLabel} ${index + 1}`;
   }
 
+  // ---------------------------------------------------------------------------
+  // 주소 검색 (postcodify 공개 API) — 사용자가 검색할 때만 검색어를 전송한다.
+  // ---------------------------------------------------------------------------
+
+  const ADDRESS_APIS = ['https://api.poesis.kr/post/search.php', 'https://api.poesis.co.kr/post/search.php'];
+
+  async function searchAddress(query) {
+    let lastError = null;
+    for (const base of ADDRESS_APIS) {
+      try {
+        const url = `${base}?q=${encodeURIComponent(query)}&v=3.3.0&ref=k-apply`;
+        const response = await fetch(url, { credentials: 'omit' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+        return (data.results || []).map((item) => ({
+          postalCode: item.postcode5,
+          address: `${item.ko_common} ${item.ko_doro}`.trim(),
+          jibunAddress: `${item.ko_common} ${item.ko_jibeon}`.trim(),
+          building: item.building_name || '',
+        }));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('주소 검색에 실패했습니다.');
+  }
+
+  function renderAddressSearch() {
+    const input = el('input', { type: 'search', placeholder: '도로명·건물명·지번으로 검색 (예: 테헤란로 152)', 'aria-label': '주소 검색어' });
+    const button = el('button', { className: 'btn', type: 'button', textContent: '주소 검색' });
+    const status = el('div', { className: 'muted small', 'aria-live': 'polite' });
+    const list = el('ul', { className: 'address-results' });
+
+    const run = async () => {
+      const query = input.value.trim();
+      if (query.length < 2) {
+        status.textContent = '검색어를 두 글자 이상 입력해 주세요.';
+        return;
+      }
+      status.textContent = '검색 중…';
+      list.replaceChildren();
+      try {
+        const results = await searchAddress(query);
+        status.textContent = results.length ? `${results.length}건 — 선택하면 우편번호·도로명·지번 주소가 채워집니다.` : '검색 결과가 없습니다.';
+        results.slice(0, 30).forEach((result) => {
+          const item = el('li', {}, [
+            el('button', { type: 'button', className: 'address-result' }, [
+              el('strong', { textContent: result.postalCode }),
+              el('span', { textContent: ` ${result.address}${result.building ? ` (${result.building})` : ''}` }),
+              el('div', { className: 'muted small', textContent: `지번 ${result.jibunAddress}` }),
+            ]),
+          ]);
+          item.querySelector('button').addEventListener('click', () => {
+            Object.assign(profile.basic, { postalCode: result.postalCode, address: result.address, jibunAddress: result.jibunAddress });
+            scheduleSave();
+            rerender('basic');
+            const detail = document.querySelector('#section-basic .address-detail-target');
+            if (detail) detail.focus();
+          });
+          list.append(item);
+        });
+      } catch (error) {
+        status.textContent = `주소 검색에 실패했습니다(${error.message}). 직접 입력해도 됩니다.`;
+      }
+    };
+    button.addEventListener('click', run);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.isComposing) {
+        event.preventDefault();
+        run();
+      }
+    });
+
+    return el('div', { className: 'address-search' }, [
+      el('div', { className: 'address-search-bar' }, [input, button]),
+      status,
+      list,
+      el('p', {
+        className: 'muted small',
+        textContent: '검색어는 주소 검색 서비스(postcodify, api.poesis.kr)로만 전송됩니다. 지원서의 주소 검색 결과와 정확히 맞추려면 이 검색으로 입력하는 것을 권장합니다.',
+      }),
+    ]);
+  }
+
   function renderSingle(section) {
     const values = profile[section.id];
     const grid = el(
@@ -124,7 +209,13 @@
         })
       )
     );
-    return el('section', { className: 'card', id: `section-${section.id}` }, [el('h2', { textContent: section.title }), grid]);
+    const card = el('section', { className: 'card', id: `section-${section.id}` }, [el('h2', { textContent: section.title }), grid]);
+    if (section.id === 'basic') {
+      card.append(renderAddressSearch());
+      const detail = grid.querySelectorAll('.field')[section.fields.findIndex((field) => field.key === 'addressDetail')];
+      if (detail) detail.querySelector('input').classList.add('address-detail-target');
+    }
+    return card;
   }
 
   function renderList(section) {
