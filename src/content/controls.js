@@ -19,6 +19,14 @@
     return String(element.value || '').trim() !== '';
   }
 
+  /** 선택지를 찾지 못했을 때 사용자에게 보여 줄 사유 */
+  function missingOption(options, candidates) {
+    const wanted = (Array.isArray(candidates) ? candidates : [candidates]).filter(Boolean)[0] || '';
+    const list = options.map((option) => String(option).trim()).filter(Boolean);
+    const shown = list.slice(0, 8).join(', ') + (list.length > 8 ? ` 외 ${list.length - 8}개` : '');
+    return { ok: false, reason: list.length ? `선택지(${shown})에 '${wanted}'에 해당하는 항목이 없습니다.` : '선택지를 불러오지 못했습니다.' };
+  }
+
   // ---------------------------------------------------------------------------
   // 네이티브 컨트롤
   // ---------------------------------------------------------------------------
@@ -35,7 +43,7 @@
       options.map((option) => option.textContent),
       candidates
     );
-    if (index < 0) return false;
+    if (index < 0) return missingOption(options.map((option) => option.textContent), candidates);
     if (select.value === options[index].value) return true;
     dom.setNativeValue(select, options[index].value);
     dom.fire(select, 'input');
@@ -58,7 +66,7 @@
   async function fillRadio(radios, candidates) {
     const usable = radios.filter((radio) => !radio.disabled);
     const index = text.pickOption(usable.map(radioLabel), candidates);
-    if (index < 0) return false;
+    if (index < 0) return missingOption(usable.map(radioLabel), candidates);
     const radio = usable[index];
     if (!radio.checked) radio.click();
     await dom.sleep(80);
@@ -139,7 +147,7 @@
     const index = text.pickOption(items.map(dom.textOf), candidates);
     if (index < 0) {
       await closeArk(trigger);
-      return false;
+      return missingOption(items.map(dom.textOf), candidates);
     }
     items[index].click();
     await dom.sleep(120);
@@ -147,23 +155,36 @@
     return trigger.getAttribute('data-placeholder-shown') === null || dom.textOf(trigger).includes(dom.textOf(items[index]));
   }
 
-  /** Ark DatePicker: 팝오버 안의 입력창에 날짜를 넣고 Enter로 확정한다. 연월 선택기도 같은 방식을 쓴다. */
-  async function fillArkDate(trigger, isoDate) {
-    const parsed = text.parseDate(isoDate);
-    if (!parsed) return false;
+  /**
+   * Ark DatePicker: 팝오버 안의 입력창에 날짜를 넣고 Enter로 확정한다. 연월 선택기도 같은 방식을 쓴다.
+   * 범위 선택기(입력창 2개)는 [시작, 종료] 배열을 받는다. 종료가 없으면(재직 중 등) 시작만 넣는다.
+   * 창이 포커스를 잃은 상태에서도 입력칸 전환이 인식되도록 focus/focusin을 직접 보낸다.
+   * @param {HTMLElement} trigger
+   * @param {string|string[]} value
+   */
+  async function fillArkDate(trigger, value) {
+    const values = (Array.isArray(value) ? value : [value]).filter((item) => text.parseDate(item));
+    if (!values.length) return false;
     trigger.click();
     const content = await dom.waitFor(() => {
       const node = arkContent(trigger);
       return node && node.querySelector('input[data-part="input"]') ? node : null;
     });
     if (!content) return false;
-    const input = content.querySelector('input[data-part="input"]');
-    dom.setNativeValue(input, text.formatDate(isoDate, 'YYYY-MM-DD'));
-    dom.fire(input, 'input');
-    dom.press(input, 'Enter');
-    await dom.sleep(150);
+    const inputs = [...content.querySelectorAll('input[data-part="input"]')];
+    for (let index = 0; index < Math.min(values.length, inputs.length); index += 1) {
+      const input = inputs[index];
+      input.focus({ preventScroll: true });
+      dom.fire(input, 'focus');
+      dom.fire(input, 'focusin');
+      await dom.sleep(60);
+      dom.setNativeValue(input, text.formatDate(values[index], 'YYYY-MM-DD'));
+      dom.fire(input, 'input');
+      dom.press(input, 'Enter');
+      await dom.sleep(200);
+    }
     await closeArk(trigger);
-    return trigger.getAttribute('data-placeholder') !== 'true';
+    return trigger.getAttribute('data-placeholder') !== 'true' && trigger.getAttribute('aria-invalid') !== 'true';
   }
 
   function arkItemText(item) {
@@ -263,6 +284,110 @@
     return hasValue(input) && input.getAttribute('aria-invalid') !== 'true';
   }
 
+  /** Ark ToggleGroup(비대상|대상, 전문학사|학사 등): 해당 항목이 선택되지 않았으면 누른다. */
+  async function fillToggleGroup(group, candidates) {
+    const items = [...group.querySelectorAll('[data-part="item"]')].filter((item) => !item.disabled);
+    const index = text.pickOption(items.map(dom.textOf), candidates);
+    if (index < 0) return false;
+    const item = items[index];
+    if (item.getAttribute('data-state') !== 'on') {
+      item.click();
+      await dom.sleep(120);
+    }
+    return item.getAttribute('data-state') === 'on';
+  }
+
+  /** 주소가 같은지 비교하기 위한 정규화: 공백·구두점 제거, "대한민국" 접두어 제거 */
+  function addressKey(value) {
+    return text.normalize(String(value || '').replace(/^\s*(대한민국|South Korea|Korea)\s*/i, ''));
+  }
+
+  /**
+   * 그리팅 주소 검색 모달(Google Places): 검색어 입력 → Enter → 우편번호와 도로명 주소가 모두 같은 결과만 선택.
+   * @param {HTMLElement} opener "주소 찾기" 버튼
+   * @param {{postalCode:string, address:string}} target
+   */
+  async function fillGreetingAddress(opener, target) {
+    opener.click();
+    const dialog = await dom.waitFor(() =>
+      [...document.querySelectorAll('[role="dialog"], [data-scope="dialog"][data-part="content"]')].find(
+        (node) => dom.isVisible(node) && node.querySelector('input[type="search"]')
+      )
+    );
+    if (!dialog) return { ok: false, reason: '주소 검색 창이 열리지 않았습니다.' };
+    const input = dialog.querySelector('input[type="search"]');
+    input.focus({ preventScroll: true });
+    dom.fire(input, 'focusin');
+    insertText(input, target.address);
+    dom.press(input, 'Enter');
+
+    const compact = (node) => String(node.textContent || '').replace(/\s+/g, '');
+    const results = () => {
+      const matches = [...dialog.querySelectorAll('div')].filter((node) => /주소.+우편번호\d{5}$/.test(compact(node)) && !/주소검색/.test(compact(node)));
+      return matches.filter((node) => !matches.some((other) => other !== node && node.contains(other)));
+    };
+    const found = await dom.waitFor(() => (results().length ? results() : null), { timeout: 8000, interval: 150 });
+    const close = () => {
+      const button = [...dialog.querySelectorAll('button')].find((node) => /닫기|close/i.test(node.getAttribute('aria-label') || dom.textOf(node)));
+      if (button) button.click();
+      else dom.press(dialog, 'Escape');
+    };
+    if (!found) {
+      close();
+      return { ok: false, reason: '주소 검색 결과가 없습니다. 프로필의 도로명 주소를 확인해 주세요.' };
+    }
+    const wantedZip = text.digitsOnly(target.postalCode);
+    const wantedAddress = addressKey(target.address);
+    const parsed = found.map((node) => {
+      const match = compact(node).match(/주소(.+)우편번호(\d{5})$/);
+      return { node, address: match ? match[1] : '', zip: match ? match[2] : '' };
+    });
+    const exact = parsed.find((item) => item.zip === wantedZip && addressKey(item.address) === wantedAddress);
+    if (!exact) {
+      close();
+      const seen = parsed.slice(0, 3).map((item) => `${item.address}(${item.zip})`).join(', ');
+      return { ok: false, reason: `검색 결과에서 우편번호·주소가 정확히 같은 항목을 찾지 못했습니다. 결과: ${seen}` };
+    }
+    exact.node.click();
+    await dom.sleep(400);
+    return { ok: true };
+  }
+
+  /**
+   * 마이다스인 주소 검색(postcodify): 검색어 입력 → 검색 → 우편번호와 도로명 주소가 모두 같은 결과 선택.
+   * @returns {Promise<{ok:boolean, reason?:string}|null>} 검색 UI를 찾지 못하면 null
+   */
+  async function fillPostcodify(opener, target) {
+    const controls = () => [...document.querySelectorAll('.postcodify_search_controls')].find(dom.isVisible);
+    if (!controls() && opener) opener.click();
+    const box = await dom.waitFor(controls, { timeout: 2500 });
+    if (!box) return null;
+    const keyword = box.querySelector('input.keyword, input[type="text"], input[type="search"]');
+    const search = box.querySelector('button.search_button, button');
+    if (!keyword || !search) return null;
+    dom.typeValue(keyword, target.address, { blur: false });
+    search.click();
+    const results = await dom.waitFor(
+      () => {
+        const items = [...document.querySelectorAll('.postcodify_search_result')].filter(dom.isVisible);
+        return items.length ? items : null;
+      },
+      { timeout: 8000, interval: 150 }
+    );
+    if (!results) return { ok: false, reason: '주소 검색 결과가 없습니다. 프로필의 도로명 주소를 확인해 주세요.' };
+    const wantedZip = text.digitsOnly(target.postalCode);
+    const wantedAddress = addressKey(target.address);
+    const exact = results.find((item) => {
+      const zip = dom.textOf(item.querySelector('.code5'));
+      const address = dom.textOf(item.querySelector('.address_info'));
+      return zip === wantedZip && addressKey(address) === wantedAddress;
+    });
+    if (!exact) return { ok: false, reason: '검색 결과에서 우편번호·주소가 정확히 같은 항목을 찾지 못했습니다.' };
+    (exact.querySelector('a.selector') || exact.querySelector('.address a') || exact).click();
+    await dom.sleep(300);
+    return { ok: true };
+  }
+
   // ---------------------------------------------------------------------------
   // Ant Design (나인하이어)
   // ---------------------------------------------------------------------------
@@ -286,7 +411,7 @@
     if (index < 0) {
       trigger.click();
       await dom.sleep(120);
-      return false;
+      return missingOption(items.map(dom.textOf), candidates);
     }
     const chosen = dom.textOf(items[index]);
     items[index].click();
@@ -486,6 +611,10 @@
     fillArkSelect,
     fillArkDate,
     fillArkCombobox,
+    fillToggleGroup,
+    fillGreetingAddress,
+    fillPostcodify,
+    addressKey,
     fillAntDropdown,
     fillAntDate,
     fillAutocompleteDropdown,
