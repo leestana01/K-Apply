@@ -81,7 +81,9 @@
       control.checked = value === true;
     } else {
       const inputType = { date: 'date', month: 'month', email: 'email', url: 'url', tel: 'tel', number: 'number' }[field.type] || 'text';
-      control = el('input', { id, type: inputType, placeholder: field.placeholder, autocomplete: field.autocomplete || 'off' });
+      // 예시 값이 실제 입력값처럼 보이지 않도록 "예:"를 붙인다.
+      const placeholder = field.placeholder && !field.placeholder.endsWith('://') ? `예: ${field.placeholder}` : field.placeholder;
+      control = el('input', { id, type: inputType, placeholder, autocomplete: field.autocomplete || 'off' });
       control.value = value;
     }
 
@@ -234,15 +236,6 @@
     return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
-  function readAsBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  }
-
   async function renderFiles() {
     const meta = await storage.loadFileMeta();
     const slots = schema.FILE_SLOTS.map((slot) => {
@@ -251,6 +244,20 @@
       const choose = el('button', { className: 'btn', type: 'button', textContent: info ? '변경' : '파일 선택' });
       const remove = el('button', { className: 'btn btn-danger', type: 'button', textContent: '삭제', hidden: !info });
       const status = el('div', { className: 'muted small' });
+      const integrity = el('div', { className: 'small muted', textContent: info ? '무결성 확인 중…' : '' });
+      if (info) {
+        // 저장된 파일을 실제로 다시 읽어 크기·SHA-256을 검증한 결과를 보여 준다.
+        storage
+          .loadFile(slot.key)
+          .then((record) => {
+            integrity.textContent = `✓ 무결성 확인됨 · SHA-256 ${record.sha256.slice(0, 12)}…`;
+            integrity.className = 'small ok';
+          })
+          .catch((error) => {
+            integrity.textContent = `✕ ${error.message}`;
+            integrity.className = 'small err';
+          });
+      }
 
       choose.addEventListener('click', () => picker.click());
       picker.addEventListener('change', async () => {
@@ -261,12 +268,22 @@
           status.className = 'small err';
           return;
         }
-        status.textContent = '저장 중…';
+        if (file.size === 0) {
+          status.textContent = '빈 파일은 등록할 수 없습니다.';
+          status.className = 'small err';
+          return;
+        }
+        status.textContent = '저장하고 검증하는 중…';
+        status.className = 'small muted';
         try {
-          await storage.saveFile(slot.key, { name: file.name, type: file.type, size: file.size, data: await readAsBase64(file) });
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          await storage.saveFile(slot.key, { name: file.name, type: file.type, bytes });
           renderFiles();
         } catch (error) {
           status.textContent = `저장 실패: ${error.message}`;
+          status.className = 'small err';
+        } finally {
+          picker.value = '';
         }
       });
       remove.addEventListener('click', async () => {
@@ -281,6 +298,7 @@
               className: 'muted small',
               textContent: `${formatBytes(info.size)} · ${new Date(info.updatedAt).toLocaleDateString('ko-KR')} 저장`,
             }),
+            integrity,
           ]
         : [el('div', { className: 'muted', textContent: '등록된 파일 없음' })];
 

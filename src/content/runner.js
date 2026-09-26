@@ -167,20 +167,35 @@
       toast.append(el('h2', null, 'K-Apply'), el('div', 'err', result.message || '입력하지 못했습니다.'));
     } else {
       const { counts, entries, notices } = result.report;
-      toast.appendChild(el('h2', null, `${result.platformName} 자동 입력 완료`));
+      toast.appendChild(el('h2', null, `${result.platformName} 자동 입력 결과`));
       const summary = el('div', 'counts');
-      summary.append(el('span', 'ok', `입력 ${counts.filled}`), el('span', 'warn', `확인 필요 ${counts.failed + counts.manual}`), el('span', null, `건너뜀 ${counts.skipped}`));
+      summary.append(
+        el('span', 'ok', `입력 ${counts.filled + counts.review}`),
+        el('span', 'warn', `확인 필요 ${counts.review + counts.manual}`),
+        el('span', 'err', `실패 ${counts.failed}`),
+        el('span', null, `건너뜀 ${counts.skipped}`)
+      );
       toast.appendChild(summary);
-      const attention = entries.filter((entry) => entry.status === 'failed' || entry.status === 'manual');
+      const order = { failed: 0, manual: 1, review: 2 };
+      const attention = entries
+        .filter((entry) => entry.status in order)
+        .sort((a, b) => order[a.status] - order[b.status]);
       if (attention.length || notices.length) {
         const list = el('ul');
-        attention.slice(0, 12).forEach((entry) => list.appendChild(el('li', 'warn', `${entry.label}${entry.detail ? ` — ${entry.detail}` : ''}`)));
+        attention.forEach((entry) =>
+          list.appendChild(
+            el('li', entry.status === 'failed' ? 'err' : 'warn', `${entry.status === 'failed' ? '실패 · ' : '확인 · '}${entry.label}${entry.detail ? ` — ${entry.detail}` : ''}`)
+          )
+        );
         notices.forEach((notice) => list.appendChild(el('li', null, notice)));
         toast.appendChild(list);
       }
     }
     wrapElement().prepend(toast);
-    toastTimer = setTimeout(() => toast && toast.remove(), result.ok && result.report.counts.failed === 0 ? 9000 : 20000);
+    // 실패나 확인할 항목이 있으면 사용자가 닫을 때까지 남겨 둔다.
+    const counts = result.ok ? result.report.counts : null;
+    const clean = counts && counts.failed + counts.review + counts.manual === 0;
+    if (clean) toastTimer = setTimeout(() => toast && toast.remove(), 9000);
   }
 
   // ---------------------------------------------------------------------------

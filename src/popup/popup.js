@@ -67,18 +67,22 @@
     box.appendChild(el('h2', null, `${result.platformName} 입력 결과`));
     const summary = el('div', 'counts');
     summary.append(
-      el('span', 'ok', `입력 ${counts.filled}`),
-      el('span', 'warn', `확인 필요 ${counts.failed + counts.manual}`),
+      el('span', 'ok', `입력 ${counts.filled + counts.review}`),
+      el('span', 'warn', `확인 필요 ${counts.review + counts.manual}`),
+      el('span', 'err', `실패 ${counts.failed}`),
       el('span', 'muted', `건너뜀 ${counts.skipped}`)
     );
     box.appendChild(summary);
     const list = el('ul');
+    const order = { failed: 0, manual: 1, review: 2, filled: 3 };
     entries
-      .filter((entry) => entry.status === 'failed' || entry.status === 'manual')
-      .forEach((entry) => list.appendChild(el('li', 'warn', `${entry.label}${entry.detail ? ` — ${entry.detail}` : ''}`)));
-    entries
-      .filter((entry) => entry.status === 'filled')
-      .forEach((entry) => list.appendChild(el('li', null, entry.label)));
+      .filter((entry) => entry.status in order)
+      .sort((a, b) => order[a.status] - order[b.status])
+      .forEach((entry) => {
+        const tone = entry.status === 'failed' ? 'err' : entry.status === 'filled' ? null : 'warn';
+        const prefix = entry.status === 'failed' ? '실패 · ' : entry.status === 'filled' ? '' : '확인 · ';
+        list.appendChild(el('li', tone, `${prefix}${entry.label}${entry.detail ? ` — ${entry.detail}` : ''}`));
+      });
     notices.forEach((notice) => list.appendChild(el('li', 'muted', notice)));
     if (list.childElementCount) box.appendChild(list);
   }

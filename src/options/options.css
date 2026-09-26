@@ -78,6 +78,12 @@
   font-size: 12px;
 }
 
+#sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .content {
   display: flex;
   flex-direction: column;
@@ -243,6 +249,14 @@
   border-radius: var(--radius);
   padding: 14px;
   background: var(--surface-muted);
+}
+
+.file-slot .ok {
+  color: var(--ok);
+}
+
+.file-slot .err {
+  color: var(--danger);
 }
 
 .file-slot .file-name {
