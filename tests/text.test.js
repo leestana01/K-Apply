@@ -122,3 +122,17 @@ test('fileFormatMismatch: 요구가 아닌 안내 문구는 무시한다', () =>
   assert.equal(text.fileFormatMismatch({ name: 'a.docx', type: '' }, { hint: '포트폴리오를 첨부해 주세요' }), null);
   assert.equal(text.fileFormatMismatch({ name: 'a.docx', type: '' }, {}), null);
 });
+
+test('matchListed: 이원화 캠퍼스(한국외국어대학교 글로벌)', () => {
+  const greeting = ['한국외국어대학교', '한국외국어대학교 KFL대학원', '한국외국어대학교 일반대학원', '사이버한국외국어대학교'];
+  const ninehire = ['사이버한국외국어대학교', '한국외국어대학교 (글로벌)', '한국외국어대학교 (서울)'];
+  // 캠퍼스 구분이 없는 목록에서는 학교 자체를 고른다.
+  assert.deepEqual(text.matchListed(greeting, '한국외국어대학교', { campus: '글로벌' }), { index: 0, exact: true });
+  // 캠퍼스별 목록에서는 해당 캠퍼스를 고른다.
+  assert.deepEqual(text.matchListed(ninehire, '한국외국어대학교', { campus: '글로벌' }), { index: 1, exact: true });
+  assert.deepEqual(text.matchListed(ninehire, '한국외국어대학교', { campus: '글로벌캠퍼스' }), { index: 1, exact: true });
+  // 캠퍼스 없이는 고르지 않는다.
+  assert.equal(text.matchListed(ninehire, '한국외국어대학교').ambiguous, true);
+  // 학교명에 캠퍼스를 붙이면 어느 목록에서도 찾지 못한다.
+  assert.equal(text.matchListed(greeting, '한국외국어대학교 글로벌캠퍼스').index, -1);
+});

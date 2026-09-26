@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-09-26
+
+### 추가
+
+- 학력에 **본교/분교** 항목 추가 (이원화 캠퍼스는 본교)
+- 나인하이어 하위 입력 폼이 필수 항목 누락으로 저장되지 않으면 비어 있는 칸 이름을 함께 표시
+
+### 수정
+
+- 마이다스인 대학 행의 본교/분교 선택에 캠퍼스명(예: "글로벌")을 넣어 실패하던 문제
+
 ## [1.1.0] - 2026-09-26
 
 ### 추가
@@ -44,6 +55,7 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/leestana01/K-Apply/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/leestana01/K-Apply/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/leestana01/K-Apply/releases/tag/v1.0.0

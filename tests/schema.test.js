@@ -40,3 +40,9 @@ test('emptyEntry: 목록형 select는 첫 선택지를 기본값으로 쓴다', 
   assert.equal(entry.level, 'university');
   assert.equal(entry.school, '');
 });
+
+test('sanitizeProfile: 학력의 본교/분교 구분', () => {
+  const profile = schema.sanitizeProfile({ educations: [{ school: '한국외국어대학교', campus: '글로벌', campusType: '본교' }, { campusType: '이상한값' }] });
+  assert.equal(profile.educations[0].campusType, '본교');
+  assert.equal(profile.educations[1].campusType, '');
+});

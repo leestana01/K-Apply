@@ -223,7 +223,14 @@
     if (!button) return { ok: false, reason: '저장 버튼을 찾지 못했습니다.' };
     if (button.disabled) {
       const cause = failures.map((part) => `${part.label}: ${part.reason || '입력 실패'}`).join(' / ');
-      return { ok: false, reason: cause || '필수 항목이 비어 있어 저장할 수 없습니다.' };
+      if (cause) return { ok: false, reason: cause };
+      // 프로필에 값이 없어 비어 있는 칸을 알려 준다(나인하이어는 전공 등을 필수로 요구할 수 있다).
+      const empty = own(block, 'input[type="text"], input:not([type]), textarea')
+        .filter((node) => !node.disabled && !controls.hasValue(node) && placeholderOf(node))
+        .map(placeholderOf);
+      const emptySelects = selectors().filter((node) => !done.has(node) && !selectorFilled(node)).map(dom.textOf);
+      const blanks = [...emptySelects, ...empty];
+      return { ok: false, reason: blanks.length ? `필수 항목이 비어 있어 저장할 수 없습니다. 비어 있는 칸: ${blanks.join(', ')}` : '필수 항목이 비어 있어 저장할 수 없습니다.' };
     }
     button.click();
     const saved = await dom.waitFor(() => (block.textContent || '').includes(plan.key), { timeout: 2000 });
