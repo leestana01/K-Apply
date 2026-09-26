@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   verify:
-    name: 테스트 · 정적 점검 (Node ${{ matrix.node }})
+    name: 린트 · 테스트 · 정적 점검 (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,6 +27,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: 개발 의존성 설치
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
 
       - name: 단위 테스트
         run: npm test

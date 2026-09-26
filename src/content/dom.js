@@ -120,17 +120,6 @@
     return null;
   }
 
-  function base64ToBytes(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    return bytes;
-  }
-
-  function toFile(record) {
-    return new File([base64ToBytes(record.data)], record.name, { type: record.type, lastModified: record.updatedAt || Date.now() });
-  }
-
   KApply.dom = {
     sleep,
     waitFor,
@@ -143,7 +132,5 @@
     textOf,
     labelOf,
     closestContaining,
-    base64ToBytes,
-    toFile,
   };
 })();

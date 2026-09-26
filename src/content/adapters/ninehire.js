@@ -108,19 +108,34 @@
     }
   }
 
+  function stem(name) {
+    return String(name).replace(/\.[^.]+$/, '');
+  }
+
   async function fillDocument(session, block, label) {
     const slot = matcher.matchFile(label);
-    if (!slot) return;
+    if (!slot || !(await session.fileMeta(slot))) return;
     const trigger = own(block, FILE_BUTTON)[0];
     const input = block.querySelector('input[type="file"]');
     if (!trigger && !input) return;
+    // 이미 첨부된 파일은 교체 방법이 공고마다 달라 덮어쓰기 설정과 관계없이 유지한다.
+    if (FILE_NAME_PATTERN.test(block.textContent || '')) {
+      session.report.add(STATUS.SKIPPED, SECTION_TITLE.documents, label, '이미 첨부된 파일이 있음 (교체하려면 직접 삭제 후 다시 실행)');
+      return;
+    }
     await session.applyFile({
       section: SECTION_TITLE.documents,
       label,
       slot,
       input,
       trigger,
-      filled: FILE_NAME_PATTERN.test(block.textContent || ''),
+      hint: dom.textOf(block.children[0]) + ' ' + dom.textOf(own(block, FILE_BUTTON)[0]),
+      rejected: () => (/업로드\s*실패|실패했습니다|지원하지 않는\s*(파일|형식)|용량을\s*초과/.test(block.textContent || '') ? '나인하이어가 파일을 거부했습니다. 형식·용량을 확인해 주세요.' : null),
+      confirm: (record) => {
+        const content = block.textContent || '';
+        if (/업로드\s*실패|오류|실패했|지원하지 않는/.test(content)) return '나인하이어가 파일을 거부했습니다. 형식·용량을 확인해 주세요.';
+        return content.includes(record.name) || content.includes(stem(record.name)) ? true : '화면에 첨부된 파일이 표시되지 않았습니다.';
+      },
     });
   }
 
@@ -148,10 +163,16 @@
     return sibling ? dom.textOf(sibling) : dom.labelOf(checkbox);
   }
 
+  /**
+   * 하위 입력 폼을 채우고 [입력사항 저장]을 누른다.
+   * @returns {{ok:boolean, reason?:string, review?:string}}
+   */
   async function runSubform(block, plan) {
     const selectors = () => own(block, SELECTOR);
     const done = new Set();
-    const results = [];
+    /** @type {Array<{label:string, ok:boolean, review?:string, reason?:string}>} */
+    const parts = [];
+    const record = (label, value) => parts.push({ label, ...KApply.engine.toOutcome(value) });
 
     if (plan.top && plan.top.length) {
       const top = selectors()[0];
@@ -164,7 +185,7 @@
 
     for (const rule of plan.checks || []) {
       const checkbox = own(block, 'input[type="checkbox"]').find((node) => rule.test.test(checkboxLabel(node)));
-      if (checkbox) results.push(await controls.fillCheckbox(checkbox, rule.checked));
+      if (checkbox) record(checkboxLabel(checkbox), await controls.fillCheckbox(checkbox, rule.checked));
     }
 
     for (const rule of plan.selects || []) {
@@ -172,13 +193,14 @@
       const selector = selectors().find((node) => !done.has(node) && rule.test.test(dom.textOf(node)));
       if (!selector) continue;
       done.add(selector);
-      results.push(await controls.fillAntDropdown(selector, rule.candidates));
+      const label = dom.textOf(selector);
+      record(label, await controls.fillAntDropdown(selector, rule.candidates));
     }
 
     for (const rule of plan.dates || []) {
       if (text.isBlank(rule.value)) continue;
       const picker = own(block, '.ant-picker input').find((node) => rule.test.test(placeholderOf(node)) && !node.disabled);
-      if (picker) results.push(await controls.fillAntDate(picker, rule.value));
+      if (picker) record(placeholderOf(picker), await controls.fillAntDate(picker, rule.value));
     }
 
     for (const rule of plan.texts || []) {
@@ -186,17 +208,32 @@
       const input = own(block, 'input[type="text"], input:not([type]), input[type="number"], textarea').find(
         (node) => !node.closest('.ant-picker') && rule.test.test(placeholderOf(node)) && !node.disabled
       );
-      if (input) results.push(await controls.fillText(input, rule.value));
+      if (!input) continue;
+      const label = placeholderOf(input);
+      // "…검색" 칸은 코드 목록(학교·전공)에서 골라야 값이 확정된다.
+      if (rule.lookup || /검색/.test(label)) {
+        record(label, await controls.fillAutocompleteDropdown(input, rule.value, rule.lookup || { reviewDirect: true }));
+      } else {
+        record(label, await controls.fillText(input, rule.value));
+      }
     }
 
+    const failures = parts.filter((part) => !part.ok);
     const button = saveButton(block);
     if (!button) return { ok: false, reason: '저장 버튼을 찾지 못했습니다.' };
-    if (button.disabled) return { ok: false, reason: '필수 항목이 비어 있어 저장할 수 없습니다.' };
+    if (button.disabled) {
+      const cause = failures.map((part) => `${part.label}: ${part.reason || '입력 실패'}`).join(' / ');
+      return { ok: false, reason: cause || '필수 항목이 비어 있어 저장할 수 없습니다.' };
+    }
     button.click();
     const saved = await dom.waitFor(() => (block.textContent || '').includes(plan.key), { timeout: 2000 });
     if (!saved) return { ok: false, reason: '저장되지 않았습니다. 필수 항목을 확인해 주세요.' };
-    const failedParts = results.filter((ok) => !ok).length;
-    return { ok: true, reason: failedParts ? `${failedParts}개 세부 항목은 직접 확인이 필요합니다.` : '' };
+
+    const notes = [
+      ...failures.map((part) => `${part.label}: ${part.reason || '입력 실패'}`),
+      ...parts.filter((part) => part.ok && part.review).map((part) => `${part.label}: ${part.review}`),
+    ];
+    return notes.length ? { ok: true, review: notes.join(' / ') } : { ok: true };
   }
 
   async function fillSubformList(session, block, sectionTitle, entries, planFor) {
@@ -214,9 +251,16 @@
       } catch (error) {
         outcome = { ok: false, reason: error.message };
       }
-      session.report.add(outcome.ok ? STATUS.FILLED : STATUS.FAILED, sectionTitle, label, outcome.reason);
-      // 저장에 실패하면 하위 폼에 값이 남아 있으므로 다음 항목을 이어서 넣지 않는다.
-      if (!outcome.ok) break;
+      const status = !outcome.ok ? STATUS.FAILED : outcome.review ? STATUS.REVIEW : STATUS.FILLED;
+      session.report.add(status, sectionTitle, label, outcome.reason || outcome.review || '');
+      // 저장에 실패하면 하위 폼에 값이 남아 있으므로 다음 항목을 이어서 넣지 않는다(값이 섞이는 것을 방지).
+      if (!outcome.ok) {
+        const remaining = entries.length - index - 1;
+        if (remaining > 0) {
+          session.manual(sectionTitle, `${sectionTitle} ${index + 2}~${entries.length}`, `위 항목을 먼저 저장해야 해서 나머지 ${remaining}건은 입력하지 않았습니다. 해결 후 다시 실행해 주세요.`);
+        }
+        break;
+      }
     }
   }
 
@@ -234,7 +278,7 @@
           { test: /졸업/, value: entry.endDate },
         ],
         texts: [
-          { test: /학교/, value: entry.school },
+          { test: /학교/, value: entry.school, lookup: { campus: entry.campus, reviewDirect: true } },
           { test: /^주전공|^전공/, value: entry.major },
           { test: /부전공/, value: entry.minor },
           { test: /복수\s*전공/, value: entry.doubleMajor },
@@ -331,7 +375,8 @@
       await fillSubformList(session, block, '어학', session.list('languages'), PLANS.languages);
     } else if (/병역/.test(label) && session.profile.military.status) {
       const outcome = await runSubform(block, militaryPlan(session)).catch((error) => ({ ok: false, reason: error.message }));
-      session.report.add(outcome.ok ? STATUS.FILLED : STATUS.FAILED, SECTION_TITLE.military, label, outcome.reason);
+      const status = !outcome.ok ? STATUS.FAILED : outcome.review ? STATUS.REVIEW : STATUS.FILLED;
+      session.report.add(status, SECTION_TITLE.military, label, outcome.reason || outcome.review || '');
     }
   }
 

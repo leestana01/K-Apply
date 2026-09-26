@@ -116,6 +116,98 @@
     return best.index;
   }
 
+  const CAMPUS_SUFFIX = /(캠퍼스|캠)$/;
+  const WITH_QUALIFIER = /^(.*?)\s*[(（]\s*([^)）]+?)\s*[)）]\s*$/;
+
+  /**
+   * 코드가 붙은 검색 목록(학교·전공·자격증 등)에서 저장된 이름에 해당하는 항목을 찾는다.
+   * 비슷한 이름으로 추측하지 않는다. 결과는 다음 중 하나다.
+   *  - { index, exact: true }                       정확히 일치 (캠퍼스 포함)
+   *  - { index, exact: false, note }                캠퍼스 구분 항목이 하나뿐이라 그 항목을 고름
+   *  - { index: -1, ambiguous: true, choices }      캠퍼스 등으로 여러 항목이 있어 고를 수 없음
+   *  - { index: -1 }                                목록에 없음
+   * @param {string[]} options 목록 항목 텍스트
+   * @param {string} name 저장된 이름 (예: '서울대학교')
+   * @param {{campus?: string}} [context] 캠퍼스·분교 (예: '관악', '신촌캠퍼스')
+   */
+  function matchListed(options, name, { campus = '' } = {}) {
+    const base = normalize(name);
+    if (!base) return { index: -1 };
+    const keys = options.map((option) => normalize(option).replace(CAMPUS_SUFFIX, ''));
+    const campusKey = normalize(campus).replace(CAMPUS_SUFFIX, '');
+
+    if (campusKey) {
+      const withCampus = keys.indexOf(base + campusKey);
+      if (withCampus >= 0) return { index: withCampus, exact: true };
+    }
+
+    const variants = [];
+    options.forEach((option, index) => {
+      const match = String(option).trim().match(WITH_QUALIFIER);
+      if (match && normalize(match[1]) === base) variants.push(index);
+    });
+
+    const exact = keys.indexOf(base);
+    // 캠퍼스를 지정했는데 목록에 그 캠퍼스가 없고 다른 캠퍼스 항목만 있다면 추측하지 않는다.
+    if (exact >= 0 && !(campusKey && variants.length)) return { index: exact, exact: true };
+    if (variants.length === 1 && !campusKey) {
+      return { index: variants[0], exact: false, note: `목록의 '${String(options[variants[0]]).trim()}' 항목을 선택했습니다.` };
+    }
+    if (variants.length > 0) {
+      return { index: -1, ambiguous: true, choices: variants.map((index) => String(options[index]).trim()) };
+    }
+    return { index: -1 };
+  }
+
+  const FORMAT_GROUPS = {
+    PDF: { label: 'PDF', extensions: ['pdf'], mimes: ['application/pdf'] },
+    WORD: { label: 'Word', extensions: ['doc', 'docx'], mimes: ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'] },
+    HWP: { label: '한글(HWP)', extensions: ['hwp', 'hwpx'], mimes: ['application/x-hwp', 'application/haansofthwp', 'application/vnd.hancom.hwp'] },
+    IMAGE: { label: '이미지', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'], mimes: ['image/'] },
+  };
+
+  /**
+   * 업로드 칸이 요구하는 파일 형식을 파악해, 파일이 맞지 않으면 사유를 돌려준다.
+   * accept 속성과 "PDF 형식으로 제출해 주세요" 같은 요구 문구를 본다.
+   * "PDF 파일로 자동 변환됩니다"처럼 요구가 아닌 안내는 무시한다.
+   * @param {{name:string, type:string}} file
+   * @param {{accept?:string, hint?:string}} field
+   * @returns {string|null}
+   */
+  function fileFormatMismatch(file, { accept = '', hint = '' } = {}) {
+    const extension = (String(file.name).match(/\.([^.]+)$/) || [])[1];
+    const ext = extension ? extension.toLowerCase() : '';
+    const mime = String(file.type || '').toLowerCase();
+
+    const acceptTokens = String(accept)
+      .split(',')
+      .map((token) => token.trim().toLowerCase())
+      .filter((token) => token && token !== '*' && token !== '*/*' && token !== '.*');
+    if (acceptTokens.length) {
+      const allowed = acceptTokens.some((token) =>
+        token.startsWith('.') ? token.slice(1) === ext : token.endsWith('/*') ? mime.startsWith(token.slice(0, -1)) : token === mime
+      );
+      if (!allowed) return `이 칸은 ${acceptTokens.join(', ')} 형식만 받습니다. 해당 형식으로 등록해 주세요.`;
+    }
+
+    const requirement = String(hint);
+    if (/자동\s*(으로)?\s*변환/.test(requirement)) return null;
+    const demands = /(형식|파일|확장자)\s*(으로|로|만)|(으로|로)\s*(제출|올려|업로드|첨부)|만\s*(가능|허용|업로드|첨부|제출)/.test(requirement);
+    if (!demands) return null;
+    const groups = Object.values(FORMAT_GROUPS).filter((group) =>
+      group === FORMAT_GROUPS.PDF
+        ? /pdf/i.test(requirement)
+        : group === FORMAT_GROUPS.WORD
+          ? /docx?|워드|word/i.test(requirement)
+          : group === FORMAT_GROUPS.HWP
+            ? /hwp|한글\s*파일/i.test(requirement)
+            : /이미지|jpe?g|png/i.test(requirement)
+    );
+    if (!groups.length) return null;
+    const ok = groups.some((group) => group.extensions.includes(ext) || group.mimes.some((prefix) => mime.startsWith(prefix)));
+    return ok ? null : `이 칸은 ${groups.map((group) => group.label).join(' 또는 ')} 형식을 요구합니다. 해당 형식으로 등록해 주세요.`;
+  }
+
   /** 쉼표·줄바꿈으로 구분된 선호값 목록을 배열로 */
   function splitCandidates(value) {
     return String(value == null ? '' : value)
@@ -172,6 +264,8 @@
     parseDate,
     formatDate,
     pickOption,
+    matchListed,
+    fileFormatMismatch,
     splitCandidates,
     candidatesFor,
     SYNONYMS,

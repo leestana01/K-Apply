@@ -4,8 +4,7 @@
 
 ## 검증
 
-- [ ] `npm test` 통과
-- [ ] `npm run check` 통과
+- [ ] `npm run verify` 통과 (lint · test · check)
 - [ ] 영향받는 채용 솔루션의 실제 지원서 화면에서 확인 (제출하지 않음)
 
 | 솔루션 | 확인한 공고 / 화면 | 결과 |

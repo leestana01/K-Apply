@@ -30,8 +30,13 @@ jobs:
             exit 1
           fi
 
-      - name: 테스트
-        run: npm test
+      - name: 개발 의존성 설치
+        run: npm ci
+
+      - name: 린트 · 테스트
+        run: |
+          npm run lint
+          npm test
 
       - name: ZIP 패키지 생성
         run: npm run package
