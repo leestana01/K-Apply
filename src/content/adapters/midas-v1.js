@@ -20,6 +20,7 @@
   if (KApply.adapters.midasV1) return;
 
   const { dom, text, controls, matcher } = KApply;
+  const { STATUS } = KApply.engine;
 
   const CONTROL = 'input:not([type="hidden"]), textarea, button, select';
 
@@ -35,11 +36,6 @@
   /** 새 화면인지: 경로 또는 경로형 name */
   function matches(doc = document, loc = location) {
     return /\/v1\/applicant\//.test(loc.pathname) || !!doc.querySelector('[name^="basicInfoGroupAnswers."], [name*="GroupResumeItemAnswers."]');
-  }
-
-  function currentStep() {
-    const step = Number(new URLSearchParams(location.search).get('step'));
-    return Number.isFinite(step) && step > 0 ? step : 1;
   }
 
   /** 행 제목: 조상을 거슬러 올라가며 컨트롤이 없는 앞쪽 형제의 짧은 텍스트를 찾는다. */
@@ -58,27 +54,35 @@
     return '';
   }
 
-  function visibleControls(selector) {
-    return [...document.querySelectorAll(selector)].filter((element) => dom.isVisible(element) && !element.closest('[role="dialog"]'));
+  function visibleControls(selector, scope = document) {
+    return [...scope.querySelectorAll(selector)].filter((element) => dom.isVisible(element) && !element.closest('[role="dialog"]'));
   }
 
   /** 행 제목이 pattern에 맞는 컨트롤 */
-  function inRow(pattern, selector = CONTROL) {
-    return visibleControls(selector).filter((element) => pattern.test(rowLabel(element)));
+  function inRow(pattern, selector = CONTROL, scope = document) {
+    return visibleControls(selector, scope).filter((element) => pattern.test(rowLabel(element)));
   }
 
-  const isSegment = (button) => button.tagName === 'BUTTON' && !!button.parentElement && button.parentElement.tagName === 'LI';
+  /** 버튼형 선택: li > button. 드롭다운·검색 결과 목록(ul > li)의 항목은 제외한다. */
+  const isSegment = (button) =>
+    button.tagName === 'BUTTON' && !!button.parentElement && button.parentElement.tagName === 'LI' && button.parentElement.parentElement.tagName !== 'UL';
 
   /** 드롭다운 트리거: li 밖의 단독 버튼 */
   const isDropdown = (button) =>
     button.tagName === 'BUTTON' && button.type === 'button' && !isSegment(button) && button.parentElement && button.parentElement.children.length === 1;
 
-  /** 행 안의 첫 번째 버튼형 선택 묶음 */
-  function segmentGroup(pattern) {
-    const buttons = inRow(pattern, 'button').filter(isSegment);
-    if (!buttons.length) return [];
-    const container = buttons[0].parentElement.parentElement;
-    return buttons.filter((button) => button.parentElement.parentElement === container);
+  /** 행 안의 버튼형 선택 묶음. option을 주면 그 선택지를 가진 묶음을 고른다(한 행에 묶음이 여럿일 때). */
+  function segmentGroup(pattern, { scope = document, option = null } = {}) {
+    const buttons = inRow(pattern, 'button', scope).filter(isSegment);
+    const groups = new Map();
+    for (const button of buttons) {
+      const container = button.parentElement.parentElement;
+      if (!groups.has(container)) groups.set(container, []);
+      groups.get(container).push(button);
+    }
+    const list = [...groups.values()];
+    if (!option) return list[0] || [];
+    return list.find((group) => group.some((button) => option.test(dom.textOf(button)))) || [];
   }
 
   const segmentValue = (group) => {
@@ -204,7 +208,7 @@
         return { ok: true, detail: zip && zip.value ? `(${zip.value}) ${shown}` : shown };
       },
     });
-    if (status === 'failed') return;
+    if (status === STATUS.FAILED) return;
 
     const detail = addressField('detailAddress');
     const detailValue = session.get('basic.addressDetail');
@@ -367,8 +371,341 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 2단계: 학력 · 경력 (항목 블록)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * "+ 고등학교" 같은 추가 버튼으로 만드는 항목 블록.
+   * 블록 머리글은 "- 고등학교" 텍스트이고, 머리글에서 조상으로 올라가며 marker 입력칸을 처음 포함하는 요소가 블록이다.
+   */
+  const BLOCKS = {
+    highschool: { name: '고등학교', marker: 'input[placeholder="입학일"]', title: '고등학교' },
+    college: { name: '대학교', marker: 'input[placeholder="입학일"]', title: '대학교' },
+    graduate: { name: '대학원', marker: 'input[placeholder="입학일"]', title: '대학원' },
+    career: { name: '직장경력', marker: 'input[placeholder="입사일"]', title: '경력' },
+  };
+
+  const SCHOOL_SEARCH = 'input[placeholder^="학교명을 검색"]';
+  const MAJOR_SEARCH = 'input[placeholder^="전공명을 검색"]';
+  const COMPANY_SEARCH = 'input[placeholder^="회사명을"]';
+
+  function blocksOf(kind) {
+    const { name, marker } = BLOCKS[kind];
+    return [...document.querySelectorAll('p')]
+      .filter((node) => dom.textOf(node) === `- ${name}`)
+      .map((header) => {
+        let node = header.parentElement;
+        while (node && !node.querySelector(marker)) node = node.parentElement;
+        return node;
+      })
+      .filter(Boolean);
+  }
+
+  /**
+   * 블록 안의 행: 제목 텍스트 요소에서 조상으로 올라가며 입력 컨트롤을 처음 포함하는 요소.
+   * 블록 안에서는 선택한 학교명·"/" 같은 텍스트가 컨트롤 앞에 끼어 있어 컨트롤 기준의 rowLabel을 쓰지 않는다.
+   */
+  function rowIn(block, pattern) {
+    const title = [...block.querySelectorAll('p, span')].find(
+      (node) => !node.querySelector(CONTROL) && pattern.test(text.cleanLabel(dom.textOf(node).replace(/\s*\*\s*$/, '')))
+    );
+    let node = title && title.parentElement;
+    while (node && node !== block.parentElement && !node.querySelector(CONTROL)) node = node.parentElement;
+    return node && node !== block.parentElement ? node : null;
+  }
+
+  /** 블록 안 행의 버튼형 선택 묶음 */
+  function segmentIn(block, pattern, option = null) {
+    const row = rowIn(block, pattern);
+    return row ? segmentGroup(/.*/, { scope: row, option }) : [];
+  }
+
+  /** 블록 안 행의 선택 버튼(드롭다운 트리거): 버튼형 선택·추가 버튼이 아닌 button */
+  function pickerIn(pattern, block) {
+    const row = rowIn(block, pattern);
+    if (!row) return null;
+    return visibleControls('button', row).find(
+      (button) => button.type === 'button' && !isSegment(button) && !button.closest('ul') && !/추가하기|^\d+\s*(년|개월|학기)$/.test(dom.textOf(button))
+    );
+  }
+
+  const adderOf = (kind) =>
+    visibleControls('button').find((button) => new RegExp(`^\\+?\\s*${BLOCKS[kind].name}\\s*\\*?$`).test(dom.textOf(button)));
+
+  async function addBlock(kind) {
+    const adder = adderOf(kind);
+    if (!adder || adder.disabled) return null;
+    const before = blocksOf(kind);
+    adder.click();
+    return dom.waitFor(() => blocksOf(kind).find((block) => !before.includes(block)) || null, { timeout: 2000 });
+  }
+
+  /** 월 단위 종료일은 그 달의 마지막 날로 입력한다(예: 2020-02 → 2020.02.29). */
+  function endDate(value) {
+    const parsed = text.parseDate(value);
+    if (!parsed) return '';
+    if (parsed.d) return text.formatDate(value, 'YYYY.MM.DD');
+    const last = new Date(parsed.y, parsed.m, 0).getDate();
+    return `${parsed.y}.${String(parsed.m).padStart(2, '0')}.${String(last).padStart(2, '0')}`;
+  }
+
+  async function applyDate(session, { section, label, input, value }) {
+    if (!input) {
+      if (value) session.manual(section, label, '입력 칸을 찾지 못했습니다.');
+      return;
+    }
+    await session.apply({
+      section,
+      label,
+      value,
+      filled: controls.hasValue(input),
+      run: async () => {
+        if (input.disabled) return { ok: false, reason: '입력 칸이 비활성화되어 있습니다.' };
+        await controls.fillText(input, value);
+        return input.value === value || { ok: false, reason: `날짜가 반영되지 않았습니다(입력값 ${input.value || '없음'}).` };
+      },
+    });
+  }
+
+  async function applySegment(session, { section, label, group, candidates }) {
+    if (!group.length || !candidates.length) return;
+    await session.apply({
+      section,
+      label,
+      value: candidates,
+      run: () => controls.fillSegment(group, candidates),
+    });
+  }
+
+  async function applyDropdown(session, { section, label, trigger, candidates }) {
+    if (!trigger || !candidates.length) return;
+    await session.apply({
+      section,
+      label,
+      value: candidates,
+      filled: !/선택해\s*주세요|^만점기준$/.test(dom.textOf(trigger)),
+      run: async () => {
+        const enabled = await dom.waitFor(() => (!trigger.disabled ? trigger : null), { timeout: 1500 });
+        if (!enabled) return { ok: false, reason: '선택 칸이 비활성화되어 있습니다.' };
+        return controls.fillButtonDropdown(trigger, candidates);
+      },
+    });
+  }
+
+  async function applyText(session, { section, label, input, value }) {
+    if (!input || text.isBlank(value)) return;
+    const typed = String(value).trim();
+    await session.apply({ section, label, value: typed, filled: controls.hasValue(input), run: () => controls.fillText(input, typed) });
+  }
+
+  /** 블록이 이미 채워졌는지: 검색 칸이 선택한 이름으로 바뀌었으면 입력된 것으로 본다. */
+  const blockFilled = (block, search) => !block.querySelector(search);
+
+  /** 목록 항목을 어느 블록에 넣을지: 같은 이름이 이미 있으면 건너뛰고, 빈 블록을 먼저 쓰고, 없으면 추가한다. */
+  async function blockFor(session, kind, name, search, used) {
+    const section = BLOCKS[kind].title;
+    const blocks = blocksOf(kind);
+    const same = blocks.find((block) => blockFilled(block, search) && text.normalize(dom.textOf(block)).includes(text.normalize(name)));
+    if (same) {
+      used.add(same);
+      session.report.add(STATUS.SKIPPED, section, name, '이미 입력됨');
+      return null;
+    }
+    const empty = blocks.find((block) => !used.has(block) && !blockFilled(block, search));
+    const block = empty || (await addBlock(kind));
+    if (!block) {
+      session.manual(section, name, '항목을 추가하지 못했습니다(최대 개수를 넘었거나 추가 버튼이 없음). 직접 입력해 주세요.');
+      return null;
+    }
+    used.add(block);
+    return block;
+  }
+
+  const DEGREE = { university: ['학사'], college: ['전문학사'], master: ['석사'], doctor: ['박사', '석박사통합'] };
+  const STATUS_CANDIDATES = {
+    졸업: ['졸업'],
+    졸업예정: ['졸업예정', '재학'],
+    재학: ['재학', '졸업예정'],
+    휴학: ['휴학'],
+    수료: ['수료'],
+    중퇴: ['중퇴', '자퇴'],
+  };
+  const regionCandidates = (region) => (text.isBlank(region) || region === '해외' ? [] : [region]);
+
+  async function fillSchoolBlock(session, block, entry, kind) {
+    const section = `${BLOCKS[kind].title} · ${entry.school}`;
+    if (kind !== 'highschool') {
+      await applySegment(session, { section, label: '학위 구분', group: segmentIn(block, /^학위\s*구분/), candidates: DEGREE[entry.level] || [] });
+    }
+
+    const search = block.querySelector(SCHOOL_SEARCH);
+    const status = await session.apply({
+      section,
+      label: '학교명',
+      value: entry.school,
+      filled: !search,
+      run: () => controls.fillSearchList(search, entry.school, { scope: block, register: 'review' }),
+    });
+    if (status === STATUS.FAILED) return;
+
+    await applyDropdown(session, {
+      section,
+      label: '소재지',
+      trigger: pickerIn(/^학교\s*정보/, block),
+      candidates: regionCandidates(entry.region),
+    });
+    if (entry.campusType) {
+      await applySegment(session, {
+        section,
+        label: '본교 / 분교',
+        group: segmentIn(block, /^학교\s*정보/, /본교|분교/),
+        candidates: entry.campusType === '제2캠퍼스' ? ['분교'] : [entry.campusType],
+      });
+    }
+    if (kind === 'highschool' && entry.dayNight) {
+      await applySegment(session, { section, label: '주간 / 야간', group: segmentIn(block, /^학교\s*정보/, /주간|야간/), candidates: [entry.dayNight] });
+    }
+
+    await applyDate(session, { section, label: '입학일', input: block.querySelector('input[placeholder="입학일"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '졸업일', input: block.querySelector('input[placeholder="졸업일"]'), value: endDate(entry.endDate) });
+    await applySegment(session, { section, label: '졸업 구분', group: segmentIn(block, /^졸업\s*구분/), candidates: STATUS_CANDIDATES[entry.status] || (entry.status ? [entry.status] : []) });
+    if (entry.entryType) {
+      await applySegment(session, { section, label: '입학 구분', group: segmentIn(block, /^입학\s*구분/), candidates: [entry.entryType] });
+    }
+
+    if (!text.isBlank(entry.gpa)) {
+      await applyDropdown(session, {
+        section,
+        label: '만점 기준',
+        trigger: pickerIn(/^학업\s*성적/, block),
+        candidates: entry.gpaScale ? [entry.gpaScale, Number(entry.gpaScale).toFixed(1)] : [],
+      });
+      await applyText(session, { section, label: '평점', input: block.querySelector('input[name$="Grade.score"]'), value: entry.gpa });
+    }
+
+    if (kind !== 'highschool') await fillMajors(session, block, entry, section);
+  }
+
+  async function fillMajors(session, block, entry, section) {
+    const majors = [
+      [entry.major, '주전공'],
+      [entry.doubleMajor, '복수전공'],
+      [entry.minor, '부전공'],
+    ].filter(([name]) => !text.isBlank(name));
+    for (const [name, type] of majors) {
+      if (text.normalize(dom.textOf(block)).includes(text.normalize(name)) && !visibleControls(MAJOR_SEARCH, block).some((input) => input.value === name)) {
+        session.report.add(STATUS.SKIPPED, section, `${type} · ${name}`, '이미 입력됨');
+        continue;
+      }
+      let input = visibleControls(MAJOR_SEARCH, block).find((element) => !controls.hasValue(element));
+      if (!input) {
+        const adder = visibleControls('button', rowIn(block, /^전공$/) || block).find((button) => /추가하기/.test(dom.textOf(button)));
+        if (!adder) {
+          session.manual(section, `${type} · ${name}`, '전공 행을 추가할 수 없습니다. 직접 입력해 주세요.');
+          continue;
+        }
+        const before = visibleControls(MAJOR_SEARCH, block);
+        adder.click();
+        input = await dom.waitFor(() => visibleControls(MAJOR_SEARCH, block).find((element) => !before.includes(element)) || null, { timeout: 1500 });
+        if (!input) {
+          session.manual(section, `${type} · ${name}`, '전공 행을 추가하지 못했습니다. 직접 입력해 주세요.');
+          continue;
+        }
+      }
+      // 전공 행: 검색 칸과 주전공/복수전공/부전공 · 주간/야간 버튼을 함께 가진 가장 가까운 조상
+      let row = input.parentElement;
+      while (row && row !== block && ![...row.querySelectorAll('li > button')].some((button) => /주전공/.test(dom.textOf(button)))) row = row.parentElement;
+      const status = await session.apply({
+        section,
+        label: `${type} · ${name}`,
+        value: name,
+        run: () => controls.fillSearchList(input, name, { scope: row || block, register: 'review' }),
+      });
+      if (status === STATUS.FAILED || !row || row === block) continue;
+      const groups = (option) => {
+        const buttons = [...row.querySelectorAll('li > button')].filter(isSegment);
+        const container = buttons.find((button) => option.test(dom.textOf(button)));
+        return container ? buttons.filter((button) => button.parentElement.parentElement === container.parentElement.parentElement) : [];
+      };
+      await applySegment(session, { section, label: `${name} · 전공 구분`, group: groups(/주전공/), candidates: [type] });
+      if (entry.dayNight) await applySegment(session, { section, label: `${name} · 주간 / 야간`, group: groups(/주간|야간/), candidates: [entry.dayNight] });
+    }
+  }
+
+  function schoolKind(entry) {
+    if (entry.level === 'highschool') return 'highschool';
+    if (entry.level === 'university' || entry.level === 'college') return 'college';
+    if (entry.level === 'master' || entry.level === 'doctor') return 'graduate';
+    return null;
+  }
+
+  async function fillEducations(session) {
+    const used = new Set();
+    for (const entry of session.list('educations')) {
+      if (text.isBlank(entry.school)) continue;
+      const kind = schoolKind(entry);
+      if (!kind) {
+        if (entry.level === 'ged') session.manual('학력', entry.school, '검정고시는 이 지원서의 학력 항목에 없으므로 직접 입력해 주세요.');
+        continue;
+      }
+      if (!adderOf(kind) && !blocksOf(kind).length) continue;
+      const block = await blockFor(session, kind, entry.school, SCHOOL_SEARCH, used);
+      if (block) await fillSchoolBlock(session, block, entry, kind);
+    }
+  }
+
+  /** 기업마다 켜는 경력 세부 항목: 행 제목 → 프로필 키 */
+  const CAREER_TEXT = [
+    [/^(근무\s*)?부서/, 'department', '부서'],
+    [/^(직위|직급|직책)/, 'position', '직급 / 직책'],
+    [/^(담당\s*업무|업무\s*내용|주요\s*업무)/, 'duties', '담당 업무'],
+    [/^연봉/, 'salary', '연봉'],
+  ];
+
+  async function fillCareers(session) {
+    if (!adderOf('career') && !blocksOf('career').length) return;
+    const used = new Set();
+    for (const entry of session.list('careers')) {
+      if (text.isBlank(entry.company)) continue;
+      if (/아르바이트/.test(entry.employmentType)) {
+        session.report.add(STATUS.SKIPPED, '경력', entry.company, '아르바이트 경력은 이 지원서의 작성 대상이 아닙니다.');
+        continue;
+      }
+      const block = await blockFor(session, 'career', entry.company, COMPANY_SEARCH, used);
+      if (!block) continue;
+      const section = `경력 · ${entry.company}`;
+
+      await applyDropdown(session, { section, label: '고용 형태', trigger: pickerIn(/^고용\s*형태/, block), candidates: entry.employmentType ? [entry.employmentType] : [] });
+      await applySegment(session, { section, label: '재직 여부', group: segmentIn(block, /^근무\s*기간/), candidates: [entry.current ? '재직중' : '퇴사'] });
+      await applyDate(session, { section, label: '입사일', input: block.querySelector('input[placeholder="입사일"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      if (!entry.current) {
+        await applyDate(session, { section, label: '퇴사일', input: block.querySelector('input[placeholder="퇴사일"]'), value: endDate(entry.endDate) });
+      }
+
+      const search = block.querySelector(COMPANY_SEARCH);
+      await session.apply({
+        section,
+        label: '회사명',
+        value: entry.company,
+        filled: !search,
+        run: () => controls.fillSearchList(search, entry.company, { scope: block, register: 'ok' }),
+      });
+
+      await applyText(session, { section, label: '퇴직 사유', input: block.querySelector('input[name$=".retirementReason"], textarea[name$=".retirementReason"]'), value: entry.resignReason });
+      for (const [pattern, key, label] of CAREER_TEXT) {
+        const input = visibleControls('input[type="text"], input[type="number"], textarea', rowIn(block, pattern) || document.createElement('div')).find((element) => !element.matches(COMPANY_SEARCH));
+        await applyText(session, { section, label, input, value: entry[key] });
+      }
+    }
+  }
+
+  const hasEntrySections = () => ['highschool', 'college', 'graduate', 'career'].some((kind) => adderOf(kind) || blocksOf(kind).length);
+
   async function fill(session) {
-    if (currentStep() === 1 || document.querySelector('[name^="basicInfoGroupAnswers."]')) {
+    const basics = !!document.querySelector('[name^="basicInfoGroupAnswers."]');
+    const entries = hasEntrySections();
+    if (basics) {
       await fillNamed(session);
       await fillBirthdate(session);
       await fillGender(session);
@@ -378,8 +715,13 @@
       await fillAddress(session);
       await fillLinks(session);
       await fillNationality(session);
-    } else {
-      session.report.notice('이 화면(학력·경력·어학 등)은 마이다스인 새 버전에서 아직 자동 입력을 지원하지 않습니다. 기본정보 단계는 자동 입력됩니다.');
+    }
+    if (entries) {
+      await fillEducations(session);
+      await fillCareers(session);
+    }
+    if (!basics && !entries) {
+      session.report.notice('이 단계(어학·자격 등)는 마이다스인 새 화면에서 아직 자동 입력을 지원하지 않습니다.');
     }
     await noticeAttachments(session);
     session.report.notice('단계를 이동하면 저장됩니다. 입력 결과를 확인한 뒤 [임시저장] 또는 [다음]을 직접 눌러 주세요.');
