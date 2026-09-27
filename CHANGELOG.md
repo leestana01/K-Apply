@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-27
+
+### 추가
+
+- 마이다스인 새 지원서 화면의 **학력 및 연구/경력 단계**: 고등학교·대학교·대학원(학위 구분, 학교명 검색, 소재지, 본교/분교, 주/야간, 입학·졸업일, 졸업·입학 구분, 평점·만점 기준, 주전공·복수전공·부전공)과 직장경력(고용 형태, 재직 여부, 입사·퇴사일, 회사명 검색, 퇴직 사유 및 기업별 추가 항목)
+- 항목 블록을 [+ 고등학교] 등으로 추가하고, 이미 같은 이름이 입력된 블록은 건너뜀(반복 실행해도 중복 추가하지 않음)
+
+### 수정
+
+- 마이다스인 새 화면의 학력·경력 단계는 항목을 추가하기 전까지 이름 있는 입력칸이 없어 입력 양식으로 인식하지 못하던 문제 → 경로(`/v1/applicant/resume-form/`)로도 판단
+
 ## [1.3.0] - 2026-09-27
 
 ### 추가
@@ -86,7 +97,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/leestana01/K-Apply/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/leestana01/K-Apply/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/leestana01/K-Apply/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/leestana01/K-Apply/compare/v1.1.0...v1.1.1
