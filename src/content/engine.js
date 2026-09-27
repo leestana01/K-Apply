@@ -39,6 +39,7 @@
   const CHOICE_DICTIONARIES = {
     'basic.gender': 'gender',
     'military.status': 'militaryStatus',
+    'military.discharge': 'discharge',
     'military.veteran': 'targetFlag',
     'military.disability': 'targetFlag',
   };
