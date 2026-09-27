@@ -892,6 +892,7 @@
     segmentSelected,
     fillAddressDialog,
     fillSearchList,
+    nameVariants,
     addressKey,
     fillAntDropdown,
     fillAntDate,

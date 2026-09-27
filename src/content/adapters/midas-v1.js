@@ -848,7 +848,8 @@
       let node = anchor.parentElement;
       while (node && !node.querySelector('p')) node = node.parentElement;
       const label = node ? dom.textOf(node.querySelector('p')) : '';
-      return { anchor, label, names: label ? [text.normalize(label), text.normalize(label.replace(/\s*\([^)]*\)\s*$/, ''))] : [] };
+      // 괄호 안팎 변형까지 포함한다: 'SQLD(SQL개발자)' ↔ 프로필 'SQL 개발자(SQLD)'
+      return { anchor, label, names: label ? controls.nameVariants(label) : [] };
     });
   }
 
@@ -925,7 +926,8 @@
     const entries = session.list('languages').filter((entry) => !text.isBlank(entry.test));
     const matching = (entry) => {
       const wanted = examNames(entry).map(text.normalize);
-      return chosenRows(EXAM_PREFIX, 'registNumber').find((row) => row.names.some((name) => wanted.includes(name)));
+      // 시험은 언어별로 다른 항목이므로(OPIc(영어) ≠ OPIc(일본어)) 전체 이름으로만 비교한다.
+      return chosenRows(EXAM_PREFIX, 'registNumber').find((row) => wanted.includes(text.normalize(row.label)));
     };
 
     // 이미 선택된 시험은 비어 있는 세부 칸만 채운다.
@@ -993,7 +995,8 @@
 
     const pending = [];
     for (const entry of entries) {
-      const existing = chosenRows(LICENSE_PREFIX, 'organization').find((row) => row.names.includes(text.normalize(entry.name)));
+      const mine = controls.nameVariants(entry.name);
+      const existing = chosenRows(LICENSE_PREFIX, 'organization').find((row) => row.names.some((name) => mine.includes(name)));
       if (existing) await fillLicenseFields(session, `자격증 · ${entry.name}`, existing.anchor, entry);
       else pending.push(entry);
     }
@@ -1083,11 +1086,25 @@
     return false;
   }
 
-  /** 칸 이름: 행 제목과 안내 문구(placeholder)를 합친다. */
+  /**
+   * 칸이 속한 항목의 이름: 반복 행은 선택된 이름 칩(예: '정보처리기사'), 블록은 머리글(예: '수상경력').
+   * 칸에서 가까운 조상부터 올라가며 컨트롤이 없는 첫 텍스트 요소를 찾는다.
+   */
+  function itemName(element) {
+    let node = element.parentElement;
+    for (let depth = 0; depth < 7 && node && node !== document.body; depth += 1) {
+      const title = [...node.querySelectorAll('p')].find((candidate) => !candidate.querySelector(CONTROL) && dom.textOf(candidate) && dom.textOf(candidate).length < 40 && dom.textOf(candidate) !== '/');
+      if (title) return dom.textOf(title).replace(/^-\s*/, '');
+      node = node.parentElement;
+    }
+    return '';
+  }
+
+  /** 칸 이름: 항목 이름 · 행 제목 · 안내 문구(placeholder) */
   function fieldName(element) {
-    const title = rowLabel(element);
-    const hint = (element.getAttribute('placeholder') || '').replace(/(을|를)?\s*(입력|검색|선택)해\s*주세요\.?$/, '').trim();
-    return [title, hint].filter(Boolean).join(' · ') || element.name || '입력 칸';
+    const hint = (element.getAttribute('placeholder') || dom.textOf(element) || '').replace(/(을|를)?\s*(입력|검색|선택)해\s*주세요\.?$/, '').trim();
+    const parts = [itemName(element), rowLabel(element), hint].filter(Boolean);
+    return [...new Set(parts)].join(' · ') || element.name || '입력 칸';
   }
 
   /**
