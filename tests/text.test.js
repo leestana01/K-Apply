@@ -164,3 +164,13 @@ test('candidatesFor: OPIc 등급 약어와 정식 명칭', () => {
   assert.equal(text.pickOption(options, text.candidatesFor('languageGrade', 'Intermediate High')), 1);
   assert.equal(text.pickOption(['AL', 'IH', 'IM'], text.candidatesFor('languageGrade', 'Advanced Low')), 0);
 });
+
+test('parseCountLimit: 안내 문구의 작성 개수 제한을 읽는다', () => {
+  assert.equal(text.parseCountLimit('대표 수상내역 1가지만 작성하시기 바랍니다.'), 1);
+  assert.equal(text.parseCountLimit('아르바이트 및 단기계약직 경력은 제외하고 작성해주시기 바랍니다. (최대 3건)'), 3);
+  assert.equal(text.parseCountLimit('대표 활동 한 가지만 적어 주세요'), 1);
+  assert.equal(text.parseCountLimit('자격증은 5개까지 입력할 수 있습니다'), 5);
+  assert.equal(text.parseCountLimit('최근 5년 이내 경력만 작성'), null);
+  assert.equal(text.parseCountLimit('편입, 중퇴 등의 경우 최초 입학 대학부터 기재'), null);
+  assert.equal(text.parseCountLimit(''), null);
+});

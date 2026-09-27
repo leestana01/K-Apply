@@ -290,7 +290,33 @@
     return splitCandidates(value);
   }
 
+  const COUNT_WORDS = { 한: 1, 하나: 1, 두: 2, 둘: 2, 세: 3, 셋: 3, 네: 4, 넷: 4, 다섯: 5 };
+
+  /**
+   * 안내 문구에서 작성 개수 제한을 읽는다. 없으면 null.
+   * @example parseCountLimit('대표 수상내역 1가지만 작성하시기 바랍니다.') === 1
+   * @example parseCountLimit('아르바이트는 제외하고 작성해주시기 바랍니다. (최대 3건)') === 3
+   */
+  function parseCountLimit(value) {
+    const source = String(value || '');
+    const number = '(\\d+|한|하나|두|둘|세|셋|네|넷|다섯)';
+    const unit = '\\s*(?:가지|건|개|곳|항목)';
+    const patterns = [
+      new RegExp(`최대\\s*${number}${unit}`),
+      new RegExp(`${number}${unit}\\s*(?:만|까지|이내|이하)`),
+    ];
+    for (const pattern of patterns) {
+      const match = source.match(pattern);
+      if (match) {
+        const count = /^\d+$/.test(match[1]) ? Number(match[1]) : COUNT_WORDS[match[1]];
+        if (count > 0) return count;
+      }
+    }
+    return null;
+  }
+
   KApply.text = {
+    parseCountLimit,
     normalize,
     cleanLabel,
     isBlank,
