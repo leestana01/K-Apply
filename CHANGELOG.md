@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-27
+
+### 수정
+
+- 마이다스인 새 화면: URL 행을 추가하면서 **URL 종류**(블로그·노션·티스토리·기타 등)를 비워 두던 문제. 주소의 도메인으로 종류를 고르고(tistory → 티스토리, notion → 노션, 그 외 → 기타), 주소는 있는데 종류가 빈 행도 채운다
+
 ## [1.8.0] - 2026-09-27
 
 ### 추가
@@ -141,7 +147,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/leestana01/K-Apply/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/leestana01/K-Apply/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/leestana01/K-Apply/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/leestana01/K-Apply/compare/v1.5.0...v1.6.0
