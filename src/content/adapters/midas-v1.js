@@ -227,8 +227,8 @@
       section: SECTION.military,
       label,
       value: candidates,
-      // 화면이 처음부터 '비대상'을 선택해 두므로 그 상태는 입력 전으로 본다.
-      filled: !!segmentValue(group) && segmentValue(group) !== '비대상',
+      // 화면이 처음부터 '비대상'을 선택해 두므로 그 상태는 입력 전으로 본다. 단, 원하는 값이 '비대상'이면 이미 입력된 것이다.
+      filled: !!segmentValue(group) && (segmentValue(group) !== '비대상' || text.pickOption([segmentValue(group)], candidates) === 0),
       run: () => controls.fillSegment(group, candidates),
     });
     return { group, status };
