@@ -7,6 +7,7 @@
   const SAVE_DELAY_MS = 400;
 
   let profile = schema.emptyProfile();
+  let settings = { ...storage.DEFAULT_SETTINGS };
   let saveTimer = null;
 
   // ---------------------------------------------------------------------------
@@ -218,6 +219,17 @@
     return card;
   }
 
+  /** 순위 안내: 무엇을 넣을지(우선순위)와 어떤 순서로 넣을지(현재 정렬 설정)를 함께 보여 준다. */
+  function rankHint(section) {
+    return `지원서가 받는 ${section.itemLabel} 개수가 정해져 있으면(대표 1건, 최대 3건 등) 1순위부터 골라 넣습니다. 넣는 순서는 ${schema.describeSort(section.id, settings)}입니다 (설정 → 목록 항목 정렬에서 변경).`;
+  }
+
+  function refreshRankHints() {
+    document.querySelectorAll('.rank-hint[data-section]').forEach((node) => {
+      node.textContent = rankHint(schema.SECTION_BY_ID[node.dataset.section]);
+    });
+  }
+
   function renderList(section) {
     const card = el('section', { className: 'card', id: `section-${section.id}` });
     const entries = profile[section.id];
@@ -229,12 +241,7 @@
     });
     card.append(el('div', { className: 'section-head' }, [el('h2', { textContent: section.title }), addButton]));
     if (section.ranked) {
-      card.append(
-        el('p', {
-          className: 'rank-hint',
-          textContent: `지원서가 받는 ${section.itemLabel} 개수가 정해져 있으면(대표 1건, 최대 3건 등) 1순위부터 골라 넣습니다. 고른 항목은 날짜순(설정의 입력 순서)으로 입력됩니다.`,
-        })
-      );
+      card.append(el('p', { className: 'rank-hint', 'data-section': section.id, textContent: rankHint(section) }));
     }
 
     const list = el('div', { className: 'entries' });
@@ -472,7 +479,6 @@
     await initSettingsValues();
     $('setting-launcher').addEventListener('change', (event) => storage.saveSettings({ showLauncher: event.target.checked }));
     $('setting-overwrite').addEventListener('change', (event) => storage.saveSettings({ overwrite: event.target.checked }));
-    $('setting-order').addEventListener('change', (event) => storage.saveSettings({ entryOrder: event.target.value }));
     $('shortcut-link').addEventListener('click', (event) => {
       event.preventDefault();
       chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
@@ -524,10 +530,14 @@
   }
 
   async function initSettingsValues() {
-    const settings = await storage.loadSettings();
+    settings = await storage.loadSettings();
     $('setting-launcher').checked = settings.showLauncher;
     $('setting-overwrite').checked = settings.overwrite;
-    $('setting-order').value = settings.entryOrder;
+    globalThis.KApply.sortControl.render($('sort-settings'), settings, storage.saveSettings, (next) => {
+      settings = next;
+      refreshRankHints();
+    });
+    refreshRankHints();
   }
 
   async function init() {

@@ -125,7 +125,12 @@
 
   $('open-options').addEventListener('click', () => chrome.runtime.openOptionsPage());
 
+  async function renderSort() {
+    globalThis.KApply.sortControl.render($('sort-settings'), await storage.loadSettings(), storage.saveSettings);
+  }
+
   renderShortcut();
+  renderSort();
   renderProfile();
   detect().catch((error) => setStatus({ title: '페이지를 확인할 수 없습니다', desc: error.message, enabled: false }));
 })();

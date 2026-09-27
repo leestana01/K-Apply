@@ -25,6 +25,11 @@
       <button id="fill" class="btn btn-primary fill" type="button" disabled>지원서 자동 입력</button>
       <p class="hint muted">단축키 <kbd id="shortcut">Alt+Shift+F</kbd> · 제출 버튼은 누르지 않습니다.</p>
 
+      <section class="card sort" aria-labelledby="sort-title">
+        <div class="sort-title" id="sort-title">목록 항목 정렬 <span class="muted">(학력·경력·활동·수상 등)</span></div>
+        <div id="sort-settings"></div>
+      </section>
+
       <section class="card profile" id="profile-summary"></section>
 
       <section class="card result" id="result" hidden></section>
@@ -34,6 +39,7 @@
     <script src="../shared/schema.js"></script>
     <script src="../shared/storage.js"></script>
     <script src="../shared/platforms.js"></script>
+    <script src="../ui/sort-control.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

@@ -141,3 +141,12 @@ kbd {
 .result li {
   margin: 2px 0;
 }
+
+.sort-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.sort .sort-row {
+  margin: 6px 0 0;
+}

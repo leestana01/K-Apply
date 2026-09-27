@@ -111,3 +111,54 @@ a {
 .muted {
   color: var(--text-muted);
 }
+
+/* 목록 정렬 설정 (옵션 화면 · 팝업 공용) */
+.sort-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 8px 0;
+}
+
+.sort-label {
+  font-weight: 600;
+}
+
+.sort-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.seg-group {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.seg-button {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.seg-button[aria-checked='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.seg-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

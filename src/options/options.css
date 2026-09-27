@@ -204,17 +204,15 @@
   margin-bottom: 12px;
 }
 
-.setting-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  margin: 10px 0;
+.sort-settings {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
-.setting-row select {
-  min-width: 200px;
+.sort-settings h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
 }
 
 .rank-hint {
