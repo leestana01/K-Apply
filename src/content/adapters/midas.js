@@ -339,15 +339,17 @@
    */
   async function fillLoop(session, { loop, title, source, entries, plan, after }) {
     if (!entries.length || rowsOf(loop).length === 0) return;
-    for (let index = 0; index < entries.length; index += 1) {
-      const entry = entries[index];
+    // 받는 행 수는 기업 설정마다 다르다. 행을 먼저 확보해 받는 개수를 알아낸 뒤,
+    // 우선순위(목록 순서)로 넣을 항목을 고르고 고른 항목은 날짜순으로 넣는다.
+    let capacity = 0;
+    while (capacity < entries.length && (await ensureRow(loop, capacity))) capacity += 1;
+    session.overflow(title, source, entries.slice(capacity), capacity);
+    const chosen = session.chronological(source, entries.slice(0, capacity));
+    for (let index = 0; index < chosen.length; index += 1) {
+      const entry = chosen[index];
       const rowLabel = `${title} ${index + 1}`;
-      const row = await ensureRow(loop, index);
-      if (!row) {
-        // 받는 행 수는 기업 설정마다 다르다. 더 추가되지 않으면 나머지를 한 번에 알린다.
-        session.overflow(title, source, entries.slice(index), index);
-        break;
-      }
+      const row = rowsOf(loop)[index];
+      if (!row) break;
       const steps = plan(entry);
       const [firstField] = steps[0];
       const first = findInRow(row, loop, index, firstField);

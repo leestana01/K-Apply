@@ -232,7 +232,7 @@
       card.append(
         el('p', {
           className: 'rank-hint',
-          textContent: `지원서가 받는 ${section.itemLabel} 개수가 정해져 있으면(대표 1건, 최대 3건 등) 1순위부터 입력합니다. 순서를 바꿔 대표 항목을 정하세요.`,
+          textContent: `지원서가 받는 ${section.itemLabel} 개수가 정해져 있으면(대표 1건, 최대 3건 등) 1순위부터 골라 넣습니다. 고른 항목은 날짜순(설정의 입력 순서)으로 입력됩니다.`,
         })
       );
     }
@@ -472,6 +472,7 @@
     await initSettingsValues();
     $('setting-launcher').addEventListener('change', (event) => storage.saveSettings({ showLauncher: event.target.checked }));
     $('setting-overwrite').addEventListener('change', (event) => storage.saveSettings({ overwrite: event.target.checked }));
+    $('setting-order').addEventListener('change', (event) => storage.saveSettings({ entryOrder: event.target.value }));
     $('shortcut-link').addEventListener('click', (event) => {
       event.preventDefault();
       chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
@@ -526,6 +527,7 @@
     const settings = await storage.loadSettings();
     $('setting-launcher').checked = settings.showLauncher;
     $('setting-overwrite').checked = settings.overwrite;
+    $('setting-order').value = settings.entryOrder;
   }
 
   async function init() {

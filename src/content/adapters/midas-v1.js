@@ -513,34 +513,35 @@
   };
 
   /**
-   * 목록 항목을 어느 블록에 넣을지: 같은 이름이 이미 있으면 건너뛰고, 빈 블록을 먼저 쓰고, 없으면 추가한다.
-   * 추가할 수 없으면(최대 개수) null을 돌려주고 limited를 표시한다.
+   * 목록 항목을 넣을 블록을 정한다.
+   * 1. 같은 이름이 이미 입력된 블록이 있으면 그 항목은 건너뛴다.
+   * 2. 빈 블록을 쓰고, 모자라면 [+ 추가]로 늘린다. 받는 개수는 기업마다 다르므로 사이트가 더 받지 않거나
+   *    안내 문구의 개수("대표 1가지만", "최대 3건")에 이르면 멈춘다.
+   * 3. 확보한 칸 수만큼 우선순위(목록 순서) 상위 항목을 고르고, 고른 항목은 날짜순으로 배치한다.
+   * @returns {Promise<Array<{entry:object, block:HTMLElement}>>}
    */
-  async function blockFor(session, kind, name, identity, used, state = {}, entry = null) {
+  async function allocate(session, { kind, sourceId, entries, nameOf, identity }) {
     const section = BLOCKS[kind].title;
-    const blocks = blocksOf(kind);
-    const same = blocks.find((block) => identity(block) && text.normalize(identity(block)).includes(text.normalize(name)));
-    if (same) {
-      used.add(same);
-      session.report.add(STATUS.SKIPPED, section, name, '이미 입력됨');
-      return null;
+    const existing = blocksOf(kind);
+    const pending = [];
+    for (const entry of entries) {
+      const name = nameOf(entry);
+      const same = existing.find((block) => identity(block) && text.normalize(identity(block)).includes(text.normalize(name)));
+      if (same) session.report.add(STATUS.SKIPPED, section, name, '이미 입력됨');
+      else pending.push(entry);
     }
-    const empty = blocks.find((block) => !used.has(block) && !identity(block));
-    // 받는 개수는 기업마다 다르다. 추가 버튼이 막혀 있지 않아도 안내 문구("대표 1가지만", "최대 3건")를 따른다.
-    const limit = blocks.length ? Math.min(...blocks.map((node) => dom.countLimitOf(node) || Infinity)) : Infinity;
-    const block = empty || (blocks.length < limit ? await addBlock(kind) : null);
-    if (!block) {
-      (state.entries = state.entries || []).push(entry || { name });
-      return null;
+    const free = existing.filter((block) => !identity(block));
+    while (free.length < pending.length) {
+      const current = blocksOf(kind);
+      const limit = current.length ? Math.min(...current.map((node) => dom.countLimitOf(node) || Infinity)) : Infinity;
+      if (current.length >= limit) break;
+      const block = await addBlock(kind);
+      if (!block) break;
+      free.push(block);
     }
-    used.add(block);
-    return block;
-  }
-
-  /** 지원서가 받는 개수를 넘어 넣지 못한 항목을 한 줄로 알린다(받는 개수는 기업마다 다름). */
-  function reportLimited(session, kind, state, sourceId) {
-    if (!state.entries || !state.entries.length) return;
-    session.overflow(BLOCKS[kind].title, sourceId, state.entries, blocksOf(kind).length);
+    const capacity = Math.min(free.length, pending.length);
+    session.overflow(section, sourceId, pending.slice(capacity), blocksOf(kind).length);
+    return session.chronological(sourceId, pending.slice(0, capacity)).map((entry, index) => ({ entry, block: free[index] }));
   }
 
   const DEGREE = { university: ['학사'], college: ['전문학사'], master: ['석사'], doctor: ['박사', '석박사통합'] };
@@ -662,20 +663,21 @@
   }
 
   async function fillEducations(session) {
-    const used = new Set();
-    const limits = { highschool: {}, college: {}, graduate: {} };
-    for (const entry of session.list('educations')) {
-      if (text.isBlank(entry.school)) continue;
-      const kind = schoolKind(entry);
-      if (!kind) {
-        if (entry.level === 'ged') session.manual('학력', entry.school, '검정고시는 이 지원서의 학력 항목에 없으므로 직접 입력해 주세요.');
-        continue;
-      }
+    const educations = session.list('educations').filter((entry) => !text.isBlank(entry.school));
+    educations
+      .filter((entry) => entry.level === 'ged')
+      .forEach((entry) => session.manual('학력', entry.school, '검정고시는 이 지원서의 학력 항목에 없으므로 직접 입력해 주세요.'));
+    for (const kind of ['highschool', 'college', 'graduate']) {
       if (!adderOf(kind) && !blocksOf(kind).length) continue;
-      const block = await blockFor(session, kind, entry.school, searchIdentity(SCHOOL_SEARCH), used, limits[kind], entry);
-      if (block) await fillSchoolBlock(session, block, entry, kind);
+      const pairs = await allocate(session, {
+        kind,
+        sourceId: 'educations',
+        entries: educations.filter((entry) => schoolKind(entry) === kind),
+        nameOf: (entry) => entry.school,
+        identity: searchIdentity(SCHOOL_SEARCH),
+      });
+      for (const { entry, block } of pairs) await fillSchoolBlock(session, block, entry, kind);
     }
-    for (const kind of Object.keys(limits)) reportLimited(session, kind, limits[kind], 'educations');
   }
 
   /** 기업마다 켜는 경력 세부 항목: 행 제목 → 프로필 키 */
@@ -688,16 +690,18 @@
 
   async function fillCareers(session) {
     if (!adderOf('career') && !blocksOf('career').length) return;
-    const used = new Set();
-    const limit = {};
-    for (const entry of session.list('careers')) {
-      if (text.isBlank(entry.company)) continue;
-      if (/아르바이트/.test(entry.employmentType)) {
-        session.report.add(STATUS.SKIPPED, '경력', entry.company, '아르바이트 경력은 이 지원서의 작성 대상이 아닙니다.');
-        continue;
-      }
-      const block = await blockFor(session, 'career', entry.company, searchIdentity(COMPANY_SEARCH), used, limit, entry);
-      if (!block) continue;
+    const careers = session.list('careers').filter((entry) => !text.isBlank(entry.company));
+    careers
+      .filter((entry) => /아르바이트/.test(entry.employmentType))
+      .forEach((entry) => session.report.add(STATUS.SKIPPED, '경력', entry.company, '아르바이트 경력은 이 지원서의 작성 대상이 아닙니다.'));
+    const pairs = await allocate(session, {
+      kind: 'career',
+      sourceId: 'careers',
+      entries: careers.filter((entry) => !/아르바이트/.test(entry.employmentType)),
+      nameOf: (entry) => entry.company,
+      identity: searchIdentity(COMPANY_SEARCH),
+    });
+    for (const { entry, block } of pairs) {
       const section = `경력 · ${entry.company}`;
 
       await applyDropdown(session, { section, label: '고용 형태', trigger: pickerIn(/^고용\s*형태/, block), candidates: entry.employmentType ? [entry.employmentType] : [] });
@@ -722,7 +726,6 @@
         await applyText(session, { section, label, input, value: entry[key] });
       }
     }
-    reportLimited(session, 'career', limit, 'careers');
   }
 
   const hasEntrySections = () => ['highschool', 'college', 'graduate', 'career'].some((kind) => adderOf(kind) || blocksOf(kind).length);
@@ -737,19 +740,32 @@
   /** 행 제목(공인외국어시험 · 자격증) 옆의 [추가하기] */
   const rowAdder = (pattern) => inRow(pattern, 'button').find((button) => /추가하기/.test(dom.textOf(button)));
 
-  /** 검색 칸이 있는 반복 행: 비어 있는 검색 칸을 쓰거나 [추가하기]로 새 행을 만든다. */
-  async function emptySearchRow(pattern, search, count = 0) {
-    const free = visibleControls(search)[0];
-    if (free) return free;
+  /** [추가하기]로 검색 칸이 있는 행을 하나 더 만든다. 안내 문구의 개수 제한("최대 2개" 등)에 이르면 만들지 않는다. */
+  async function addSearchRow(pattern, search, count) {
     const adder = rowAdder(pattern);
     if (!adder || adder.disabled) return null;
-    // 안내 문구의 개수 제한("최대 2개" 등)을 넘으면 추가하지 않는다.
     let section = adder.parentElement;
     while (section && section !== document.body && !pattern.test(text.cleanLabel(dom.textOf(section)))) section = section.parentElement;
     const limit = section && section !== document.body ? dom.countLimitOf(section) : null;
     if (limit && count >= limit) return null;
+    const before = visibleControls(search);
     adder.click();
-    return dom.waitFor(() => visibleControls(search)[0] || null, { timeout: 1500 });
+    return dom.waitFor(() => visibleControls(search).find((element) => !before.includes(element)) || null, { timeout: 1500 });
+  }
+
+  /** 비어 있는 검색 칸을 쓰거나 [추가하기]로 새 행을 만든다. */
+  async function emptySearchRow(pattern, search, count = 0) {
+    return visibleControls(search)[0] || addSearchRow(pattern, search, count);
+  }
+
+  /**
+   * 새로 넣을 항목 수(want)만큼 빈 검색 행을 미리 확보하고 확보한 수를 돌려준다.
+   * 받는 개수는 기업마다 다르므로, 사이트가 더 받지 않거나 안내 문구의 개수에 이르면 멈춘다.
+   */
+  async function reserveSearchRows(pattern, search, want, filled) {
+    let free = visibleControls(search).length;
+    while (free < want && (await addSearchRow(pattern, search, filled() + free))) free += 1;
+    return Math.min(free, want);
   }
 
   /** 검색 칸이 속한 행: 선택 후 나타나는 입력칸(name에 index 포함)을 함께 가진 가장 가까운 조상 */
@@ -843,38 +859,51 @@
     if (!rowAdder(/^공인\s*외국어/) && !visibleControls(EXAM_SEARCH).length) return;
     const registers = () => [...document.querySelectorAll(`input[name^="${EXAM_PREFIX}"][name$=".registNumber"]`)];
     const entries = session.list('languages').filter((entry) => !text.isBlank(entry.test));
-    for (const [position, entry] of entries.entries()) {
+    const matching = (entry) => {
+      const wanted = examNames(entry).map(text.normalize);
+      return chosenRows(EXAM_PREFIX, 'registNumber').find((row) => row.names.some((name) => wanted.includes(name)));
+    };
+
+    // 이미 선택된 시험은 비어 있는 세부 칸만 채운다.
+    const pending = [];
+    for (const entry of entries) {
+      const existing = matching(entry);
+      if (!existing) pending.push(entry);
+      else if (existing.anchor.disabled) session.manual(`어학 · ${examNames(entry)[0]}`, '성적 인증', 'YBM 성적 인증을 거쳐야 점수가 입력되는 시험입니다. 인증 창에서 인증해 주세요.');
+      else await fillExamFields(session, `어학 · ${examNames(entry)[0]}`, existing.anchor, entry);
+    }
+
+    // 받는 개수만큼 행을 확보하고, 우선순위 상위 항목을 날짜순으로 넣는다.
+    const capacity = await reserveSearchRows(/^공인\s*외국어/, EXAM_SEARCH, pending.length, () => registers().length);
+    session.overflow('어학', 'languages', pending.slice(capacity), registers().length + capacity);
+    for (const entry of session.chronological('languages', pending.slice(0, capacity))) {
       const names = examNames(entry);
       const section = `어학 · ${names[0]}`;
-      const wanted = names.map(text.normalize);
-      const existing = chosenRows(EXAM_PREFIX, 'registNumber').find((row) => row.names.some((name) => wanted.includes(name)));
-      let register = existing && existing.anchor;
-      let blocked = 0;
-      if (!register) {
-        const chosen = await chooseInRow(session, {
-          pattern: /^공인\s*외국어/,
-          search: EXAM_SEARCH,
-          section,
-          label: '시험명',
-          value: String(entry.test).trim(),
-          anchors: registers,
-          options: { names },
-          guard: true,
-        });
-        if (chosen.status === 'limited') {
-          session.overflow('어학', 'languages', entries.slice(position), registers().length);
-          break;
-        }
-        if (chosen.status === STATUS.FAILED || !chosen.anchor) continue;
-        register = chosen.anchor;
-        blocked = chosen.extra.blocked;
-      }
-      if (blocked !== 0 || register.disabled) {
+      const chosen = await chooseInRow(session, {
+        pattern: /^공인\s*외국어/,
+        search: EXAM_SEARCH,
+        section,
+        label: '시험명',
+        value: String(entry.test).trim(),
+        anchors: registers,
+        options: { names },
+        guard: true,
+      });
+      if (chosen.status === STATUS.FAILED || chosen.status === 'limited' || !chosen.anchor) continue;
+      if (chosen.extra.blocked !== 0 || chosen.anchor.disabled) {
         session.manual(section, '성적 인증', 'YBM 성적 인증을 거쳐야 점수가 입력되는 시험입니다. 시험을 지운 뒤 다시 선택해 인증 창에서 인증해 주세요.');
         continue;
       }
-      await fillExamFields(session, section, register, entry);
+      await fillExamFields(session, section, chosen.anchor, entry);
     }
+  }
+
+  async function fillLicenseFields(session, section, organization, entry) {
+    const index = organization.name.slice(LICENSE_PREFIX.length).split('.')[0];
+    const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
+    await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
+    await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+    await applyText(session, { section, label: '자격 번호', input: document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`), value: entry.number });
   }
 
   async function fillLicenses(session) {
@@ -882,62 +911,62 @@
     // 목록에 없는 자격증(직접 등록)은 자격 번호 칸이 없으므로 발행 기관 칸을 기준으로 삼는다.
     const organizations = () => [...document.querySelectorAll(`input[name^="${LICENSE_PREFIX}"][name$=".organization"]`)];
     const entries = session.list('certificates').filter((entry) => !text.isBlank(entry.name));
-    for (const [position, entry] of entries.entries()) {
-      const section = `자격증 · ${entry.name}`;
+
+    const pending = [];
+    for (const entry of entries) {
       const existing = chosenRows(LICENSE_PREFIX, 'organization').find((row) => row.names.includes(text.normalize(entry.name)));
-      let organization = existing && existing.anchor;
-      if (!organization) {
-        const chosen = await chooseInRow(session, {
-          pattern: /^자격증/,
-          search: LICENSE_SEARCH,
-          section,
-          label: '자격증명',
-          value: entry.name,
-          anchors: organizations,
-          options: { register: 'review', alias: true },
-        });
-        if (chosen.status === 'limited') {
-          session.overflow('자격증', 'certificates', entries.slice(position), organizations().length);
-          break;
-        }
-        if (chosen.status === STATUS.FAILED || !chosen.anchor) continue;
-        organization = chosen.anchor;
-      }
-      const index = organization.name.slice(LICENSE_PREFIX.length).split('.')[0];
-      const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
-      await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
-      await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
-      await applyText(session, { section, label: '자격 번호', input: document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`), value: entry.number });
+      if (existing) await fillLicenseFields(session, `자격증 · ${entry.name}`, existing.anchor, entry);
+      else pending.push(entry);
+    }
+
+    const capacity = await reserveSearchRows(/^자격증/, LICENSE_SEARCH, pending.length, () => organizations().length);
+    session.overflow('자격증', 'certificates', pending.slice(capacity), organizations().length + capacity);
+    for (const entry of session.chronological('certificates', pending.slice(0, capacity))) {
+      const section = `자격증 · ${entry.name}`;
+      const chosen = await chooseInRow(session, {
+        pattern: /^자격증/,
+        search: LICENSE_SEARCH,
+        section,
+        label: '자격증명',
+        value: entry.name,
+        anchors: organizations,
+        options: { register: 'review', alias: true },
+      });
+      if (chosen.status === STATUS.FAILED || chosen.status === 'limited' || !chosen.anchor) continue;
+      await fillLicenseFields(session, section, chosen.anchor, entry);
     }
   }
 
   async function fillAwards(session) {
     if (!adderOf('award') && !blocksOf('award').length) return;
-    const used = new Set();
-    const limit = {};
-    for (const entry of session.list('awards')) {
-      if (text.isBlank(entry.name)) continue;
-      const block = await blockFor(session, 'award', entry.name, inputIdentity('input[name$=".awardName"]'), used, limit, entry);
-      if (!block) continue;
+    const pairs = await allocate(session, {
+      kind: 'award',
+      sourceId: 'awards',
+      entries: session.list('awards').filter((entry) => !text.isBlank(entry.name)),
+      nameOf: (entry) => entry.name,
+      identity: inputIdentity('input[name$=".awardName"]'),
+    });
+    for (const { entry, block } of pairs) {
       const section = `수상 · ${entry.name}`;
       await applyText(session, { section, label: '상훈명', input: block.querySelector('input[name$=".awardName"]'), value: entry.name });
       await applyText(session, { section, label: '수여 기관', input: block.querySelector('input[name$=".organization"]'), value: entry.issuer });
       await applyDate(session, { section, label: '수상일', input: block.querySelector('input[placeholder="발급일"], input[placeholder="수상일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
       await applyText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".comment"]'), value: entry.description });
     }
-    reportLimited(session, 'award', limit, 'awards');
   }
 
   async function fillActivities(session) {
     if (!adderOf('activity') && !blocksOf('activity').length) return;
-    const used = new Set();
-    const limit = {};
     const orName = (entry) => entry.organization || entry.name;
-    for (const entry of session.list('activities')) {
+    const pairs = await allocate(session, {
+      kind: 'activity',
+      sourceId: 'activities',
+      entries: session.list('activities').filter((entry) => !text.isBlank(orName(entry))),
+      nameOf: orName,
+      identity: inputIdentity('input[name$=".organization"]'),
+    });
+    for (const { entry, block } of pairs) {
       const name = orName(entry);
-      if (text.isBlank(name)) continue;
-      const block = await blockFor(session, 'activity', name, inputIdentity('input[name$=".organization"]'), used, limit, entry);
-      if (!block) continue;
       const section = `학내외활동 · ${name}`;
       await applyDropdown(session, { section, label: '활동 구분', trigger: pickerIn(/^활동\s*구분/, block), candidates: text.candidatesFor('activityType', entry.type) });
       await applyText(session, { section, label: '기관 및 조직명', input: block.querySelector('input[name$=".organization"]'), value: name });
@@ -948,7 +977,6 @@
       const contents = [entry.organization && entry.name !== entry.organization ? entry.name : '', entry.description].filter(Boolean).join(' - ');
       await applyText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".contents"]'), value: contents });
     }
-    reportLimited(session, 'activity', limit, 'activities');
   }
 
   const hasStep3Sections = () => !!(rowAdder(/^공인\s*외국어/) || rowAdder(/^자격증/) || adderOf('award') || adderOf('activity') || blocksOf('award').length || blocksOf('activity').length);

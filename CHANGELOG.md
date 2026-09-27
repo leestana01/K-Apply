@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-27
+
+### 추가
+
+- 옵션 **설정 → 목록 항목 입력 순서**(최신순 기본 / 오래된순)
+
+### 변경
+
+- 목록 항목의 **선택과 배치를 분리**: 지원서가 받는 개수를 먼저 확인한 뒤 우선순위 상위 항목을 고르고, 고른 항목은 날짜순(시작일, 자격증·어학·수상은 취득일)으로 입력. 우선순위를 바꿔도 지원서의 항목 순서는 날짜순을 유지 (그리팅·나인하이어·마이다스인 기존/새 화면 공통)
+
 ## [1.7.0] - 2026-09-27
 
 ### 추가
@@ -131,7 +141,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/leestana01/K-Apply/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/leestana01/K-Apply/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/leestana01/K-Apply/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/leestana01/K-Apply/compare/v1.4.0...v1.5.0

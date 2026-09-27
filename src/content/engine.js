@@ -54,6 +54,23 @@
     return '';
   }
 
+  /** 목록별 날짜 기준 필드(시작일 또는 취득일) */
+  const DATE_KEYS = {
+    educations: 'startDate',
+    careers: 'startDate',
+    projects: 'startDate',
+    activities: 'startDate',
+    trainings: 'startDate',
+    languages: 'date',
+    certificates: 'date',
+    awards: 'date',
+  };
+
+  function dateValue(sectionId, entry) {
+    const parsed = text.parseDate(entry && entry[DATE_KEYS[sectionId]]);
+    return parsed ? parsed.y * 10000 + parsed.m * 100 + (parsed.d || 0) : null;
+  }
+
   class Report {
     constructor() {
       this.entries = [];
@@ -166,6 +183,21 @@
         this.report.add(STATUS.FAILED, section, label, error && error.message ? error.message : String(error));
         return STATUS.FAILED;
       }
+    }
+
+    /**
+     * 넣을 항목을 날짜순으로 정렬한 복사본. 어떤 항목을 넣을지는 우선순위(목록 순서)로 먼저 고르고,
+     * 고른 항목을 넣는 순서만 날짜로 정한다. 날짜가 없는 항목은 우선순위 순서로 뒤에 둔다.
+     */
+    chronological(sectionId, entries) {
+      const recent = this.settings.entryOrder !== 'oldest';
+      return entries
+        .map((entry, rank) => ({ entry, rank, date: dateValue(sectionId, entry) }))
+        .sort((a, b) => {
+          if (a.date === null || b.date === null) return a.date === null && b.date === null ? a.rank - b.rank : a.date === null ? 1 : -1;
+          return a.date === b.date ? a.rank - b.rank : recent ? b.date - a.date : a.date - b.date;
+        })
+        .map((item) => item.entry);
     }
 
     manual(section, label, detail) {
