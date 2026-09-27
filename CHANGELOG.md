@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-27
+
+### 추가
+
+- 마이다스인 **새 지원서 화면**(`/v1/applicant/resume-form`, 예: 교보증권) 지원: 기본정보 단계의 이름·연락처·이메일·영문 이름·생년월일·성별·병역(구분·입대일·제대일·계급·제대 구분)·장애/보훈 여부·주소(사이트 주소 검색 창 경유)·URL·국적
+- 제대 구분 동의어(만기전역 = 만기제대 등)
+
+### 수정
+
+- 마이다스인 새 화면을 "지원서 작성 화면이 아님"으로 판단해 실행되지 않던 문제
+- 동의어 사전을 대표값으로만 조회해, 동의어로 저장한 프로필 값(예: "만기제대")이 선택지와 맞지 않던 문제
+
 ## [1.2.0] - 2026-09-26
 
 ### 추가
@@ -74,7 +86,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/leestana01/K-Apply/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/leestana01/K-Apply/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/leestana01/K-Apply/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/leestana01/K-Apply/compare/v1.0.0...v1.1.0

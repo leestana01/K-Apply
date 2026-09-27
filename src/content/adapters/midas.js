@@ -592,6 +592,10 @@
   }
 
   async function fill(session) {
+    // 새 지원서 화면(/v1/applicant)은 구조가 전혀 달라 별도 어댑터가 처리한다.
+    const modern = KApply.adapters.midasV1;
+    if (modern && modern.matches()) return modern.fill(session);
+
     await fillRegistration(session);
     await fillSingles(session);
     await fillAddress(session);

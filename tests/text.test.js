@@ -150,3 +150,10 @@ test('candidatesFor: 병역 구분은 사이트별 표기를 맞춘다', () => {
   assert.equal(ninehire[text.pickOption(ninehire, text.candidatesFor('militaryStatus', '면제'))], '병역면제');
   assert.equal(ninehire[text.pickOption(ninehire, text.candidatesFor('militaryStatus', '비대상'))], '해당없음');
 });
+
+test('candidatesFor: 동의어로 저장된 값도 같은 묶음으로 찾는다', () => {
+  const candidates = text.candidatesFor('discharge', '만기제대');
+  assert.equal(candidates[0], '만기제대');
+  assert.equal(text.pickOption(['만기전역', '의가사전역', '의병전역'], candidates), 0);
+  assert.equal(text.pickOption(['만기제대', '의가사제대'], text.candidatesFor('discharge', '의가사전역')), 1);
+});

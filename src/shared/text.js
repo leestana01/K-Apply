@@ -241,6 +241,14 @@
       면제: ['면제'],
       복무중: ['복무중', '복무 중', '재복무'],
     },
+    discharge: {
+      만기전역: ['만기전역', '만기제대', '만기'],
+      의가사전역: ['의가사전역', '의가사제대', '의가사'],
+      의병전역: ['의병전역', '의병제대', '의병'],
+      소집해제: ['소집해제', '소집 해제'],
+      불명예전역: ['불명예전역', '불명예제대'],
+      기타: ['기타'],
+    },
     activityType: {
       교내활동: ['교내활동', '학내활동'],
       대외활동: ['대외활동', '교외활동', '사회활동'],
@@ -256,11 +264,18 @@
     },
   };
 
-  /** 동의어 사전을 조회해 후보 표현 목록을 만든다. 사전에 없으면 값 자체를 후보로 쓴다. */
+  /**
+   * 동의어 사전을 조회해 후보 표현 목록을 만든다.
+   * 대표값뿐 아니라 동의어(예: '만기제대')로 저장된 값도 같은 묶음으로 찾는다. 사전에 없으면 값 자체를 후보로 쓴다.
+   */
   function candidatesFor(dictionary, value) {
     if (isBlank(value)) return [];
     const table = SYNONYMS[dictionary] || {};
-    return table[value] ? table[value].slice() : splitCandidates(value);
+    if (table[value]) return table[value].slice();
+    const key = normalize(value);
+    const group = Object.values(table).find((words) => words.some((word) => normalize(word) === key));
+    if (group) return [String(value), ...group.filter((word) => word !== value)];
+    return splitCandidates(value);
   }
 
   KApply.text = {
