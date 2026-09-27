@@ -378,6 +378,31 @@
     return { ok: true };
   }
 
+  /**
+   * 외부 인증 창(새 창)을 막은 채로 action을 실행한다. 막은 횟수를 돌려준다.
+   * 브리지를 쓸 수 없으면 action을 실행하지 않고 null을 돌려준다(창이 열릴 위험을 피한다).
+   * @param {() => Promise<*>} action
+   * @returns {Promise<{value:*, blocked:(number|null)}|null>}
+   */
+  async function withPopupGuard(action) {
+    if (!(await ensureBridge())) return null;
+    const token = crypto.randomUUID();
+    const armed = waitForBridgeMessage('popup-guard-armed', token, 1500);
+    postToBridge({ type: 'arm-popup-guard', token });
+    if (!(await armed)) return null;
+    let value;
+    let result;
+    try {
+      value = await action();
+    } finally {
+      result = waitForBridgeMessage('popup-guard-result', token, 1500);
+      postToBridge({ type: 'release-popup-guard', token });
+    }
+    const released = await result;
+    // 결과를 받지 못하면(차단 시간 초과로 먼저 해제됨) 창이 열렸는지 알 수 없으므로 null
+    return { value, blocked: released ? Number(released.blocked) || 0 : null };
+  }
+
   // ---------------------------------------------------------------------------
   // 실행 진입점
   // ---------------------------------------------------------------------------
@@ -404,5 +429,5 @@
     return { ok: true, platform: detected.id, platformName: detected.name, report: session.report.toJSON() };
   }
 
-  KApply.engine = { STATUS, Session, Report, run, toOutcome, uploadTimeout, postcodeViaBridge };
+  KApply.engine = { STATUS, Session, Report, run, toOutcome, uploadTimeout, postcodeViaBridge, withPopupGuard };
 })();
