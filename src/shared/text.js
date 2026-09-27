@@ -258,6 +258,18 @@
       해외경험: ['해외경험', '해외활동', '어학연수'],
       기타: ['기타'],
     },
+    languageGrade: {
+      AL: ['Advanced Low', 'AL'],
+      IH: ['Intermediate High', 'IH'],
+      IM3: ['Intermediate Mid 3', 'IM3'],
+      IM2: ['Intermediate Mid 2', 'IM2'],
+      IM1: ['Intermediate Mid 1', 'IM1'],
+      IM: ['Intermediate Mid', 'IM'],
+      IL: ['Intermediate Low', 'IL'],
+      NH: ['Novice High', 'NH'],
+      NM: ['Novice Mid', 'NM'],
+      NL: ['Novice Low', 'NL'],
+    },
     targetFlag: {
       비대상: ['비대상', '해당없음', '아니오', '없음', 'N'],
       대상: ['대상', '해당', '예', '있음', 'Y'],

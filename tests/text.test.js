@@ -157,3 +157,10 @@ test('candidatesFor: 동의어로 저장된 값도 같은 묶음으로 찾는다
   assert.equal(text.pickOption(['만기전역', '의가사전역', '의병전역'], candidates), 0);
   assert.equal(text.pickOption(['만기제대', '의가사제대'], text.candidatesFor('discharge', '의가사전역')), 1);
 });
+
+test('candidatesFor: OPIc 등급 약어와 정식 명칭', () => {
+  const options = ['Advanced Low', 'Intermediate High', 'Intermediate Mid 3', 'Intermediate Mid 2', 'Intermediate Mid 1'];
+  assert.equal(text.pickOption(options, text.candidatesFor('languageGrade', 'IM2')), 3);
+  assert.equal(text.pickOption(options, text.candidatesFor('languageGrade', 'Intermediate High')), 1);
+  assert.equal(text.pickOption(['AL', 'IH', 'IM'], text.candidatesFor('languageGrade', 'Advanced Low')), 0);
+});

@@ -18,6 +18,12 @@
  *    사용자가 선택한 것과 같은 형태의 결과(zonecode, roadAddress, jibunAddress …)로 oncomplete를 호출한다.
  *    arm 후 5초가 지나면 원래 위젯으로 복구한다.
  *
+ * 4) 외부 인증 창 차단 (arm-popup-guard / release-popup-guard)
+ *    일부 항목은 선택하는 순간 외부 인증 창을 연다(예: 마이다스인에서 YBM 연동 기업의 TOEIC 선택 시
+ *    window.open + form.submit으로 YBM 로그인 창). 확장프로그램이 항목을 고르는 동안에만
+ *    window.open과 새 창을 대상으로 하는 form.submit을 막고, 막은 횟수를 돌려준다.
+ *    release 또는 5초 경과 시 원래 동작으로 복구한다.
+ *
  * 파일 내용·주소는 사용자가 입력하려는 바로 그 페이지에만 전달된다.
  */
 (function () {
@@ -237,6 +243,42 @@
     post('postcode-armed', data.token);
   }
 
+  // ---------------------------------------------------------------------------
+  // 4) 외부 인증 창 차단
+  // ---------------------------------------------------------------------------
+
+  const originalOpen = window.open;
+  const originalSubmit = HTMLFormElement.prototype.submit;
+  let guard = null;
+
+  function releaseGuard() {
+    if (!guard) return;
+    const { token, blocked, timer } = guard;
+    guard = null;
+    clearTimeout(timer);
+    window.open = originalOpen;
+    HTMLFormElement.prototype.submit = originalSubmit;
+    post('popup-guard-result', token, { blocked });
+  }
+
+  function armGuard(data) {
+    releaseGuard();
+    guard = { token: data.token, blocked: 0, timer: setTimeout(releaseGuard, ARM_TIMEOUT_MS) };
+    window.open = function () {
+      guard.blocked += 1;
+      return null;
+    };
+    HTMLFormElement.prototype.submit = function () {
+      const target = this.getAttribute('target');
+      if (target && target !== '_self') {
+        guard.blocked += 1;
+        return undefined;
+      }
+      return originalSubmit.apply(this, arguments);
+    };
+    post('popup-guard-armed', data.token);
+  }
+
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (event.source !== window || !data || data.source !== SOURCE) return;
@@ -244,5 +286,7 @@
     else if (data.type === 'watch') watch(data);
     else if (data.type === 'unwatch') unwatch(data);
     else if (data.type === 'arm-postcode') armPostcode(data);
+    else if (data.type === 'arm-popup-guard') armGuard(data);
+    else if (data.type === 'release-popup-guard' && guard && guard.token === data.token) releaseGuard();
   });
 })();
