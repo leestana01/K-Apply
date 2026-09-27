@@ -234,6 +234,7 @@
       id: 'careers',
       title: '경력',
       kind: 'list',
+      ranked: true,
       itemLabel: '경력',
       summary: ['company', 'position'],
       fields: [
@@ -266,6 +267,7 @@
       id: 'projects',
       title: '프로젝트',
       kind: 'list',
+      ranked: true,
       itemLabel: '프로젝트',
       summary: ['name', 'organization'],
       fields: [
@@ -283,6 +285,7 @@
       id: 'activities',
       title: '대외활동 · 동아리 · 봉사',
       kind: 'list',
+      ranked: true,
       itemLabel: '활동',
       summary: ['name', 'organization'],
       fields: [
@@ -313,6 +316,7 @@
       id: 'trainings',
       title: '교육 이수',
       kind: 'list',
+      ranked: true,
       itemLabel: '교육',
       summary: ['course', 'institution'],
       fields: [
@@ -328,6 +332,7 @@
       id: 'languages',
       title: '어학',
       kind: 'list',
+      ranked: true,
       itemLabel: '어학 시험',
       summary: ['test', 'score'],
       fields: [
@@ -344,6 +349,7 @@
       id: 'certificates',
       title: '자격증',
       kind: 'list',
+      ranked: true,
       itemLabel: '자격증',
       summary: ['name', 'issuer'],
       fields: [
@@ -358,6 +364,7 @@
       id: 'awards',
       title: '수상',
       kind: 'list',
+      ranked: true,
       itemLabel: '수상',
       summary: ['name', 'issuer'],
       fields: [
