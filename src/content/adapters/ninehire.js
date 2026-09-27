@@ -332,14 +332,26 @@
   }
 
   /** @returns {Promise<boolean>} 모든 항목을 저장했거나 건너뛰었으면 true, 저장 실패로 중단했으면 false */
-  async function fillSubformList(session, block, sectionTitle, entries, planFor) {
+  async function fillSubformList(session, block, sectionTitle, entries, planFor, sourceId) {
+    // 받는 개수는 공고마다 다르다. 항목 안내 문구("최대 3개" 등)가 있으면 그 수까지만 넣는다.
+    const limit = dom.countLimitOf(block);
+    let taken = 0;
     for (let index = 0; index < entries.length; index += 1) {
       const plan = planFor(entries[index]);
       const label = `${sectionTitle} ${index + 1}${plan.key ? ` (${plan.key})` : ''}`;
       if (!plan.key) continue;
       if ((block.textContent || '').includes(plan.key)) {
+        taken += 1;
         session.report.add(STATUS.SKIPPED, sectionTitle, label, '이미 입력됨');
         continue;
+      }
+      if (limit && taken >= limit) {
+        const rest = entries.slice(index).filter((entry) => {
+          const key = planFor(entry).key;
+          return key && !(block.textContent || '').includes(key);
+        });
+        session.overflow(sectionTitle, sourceId, rest, limit);
+        return true;
       }
       let outcome;
       try {
@@ -347,6 +359,7 @@
       } catch (error) {
         outcome = { ok: false, reason: error.message };
       }
+      if (outcome.ok) taken += 1;
       const status = !outcome.ok ? STATUS.FAILED : outcome.review ? STATUS.REVIEW : STATUS.FILLED;
       session.report.add(status, sectionTitle, label, outcome.reason || outcome.review || '');
       // 저장에 실패하면 하위 폼에 값이 남아 있으므로 다음 항목을 이어서 넣지 않는다(값이 섞이는 것을 방지).
@@ -473,19 +486,19 @@
 
   async function fillListBlock(session, block, label) {
     if (/학력/.test(label)) {
-      await fillSubformList(session, block, '학력', session.list('educations'), PLANS.educations);
+      await fillSubformList(session, block, '학력', session.list('educations'), PLANS.educations, 'educations');
     } else if (/경력/.test(label) && !/유무|여부/.test(label)) {
-      await fillSubformList(session, block, '경력', session.list('careers'), PLANS.careers);
+      await fillSubformList(session, block, '경력', session.list('careers'), PLANS.careers, 'careers');
     } else if (/자격|수상|면허/.test(label)) {
       // 자격증과 수상이 같은 하위 폼을 쓰므로, 앞 목록 저장이 실패하면 값이 섞이지 않게 멈춘다.
       let ok = true;
-      if (/자격|면허/.test(label)) ok = await fillSubformList(session, block, '자격증', session.list('certificates'), PLANS.certificates);
+      if (/자격|면허/.test(label)) ok = await fillSubformList(session, block, '자격증', session.list('certificates'), PLANS.certificates, 'certificates');
       if (/수상/.test(label)) {
-        if (ok) await fillSubformList(session, block, '수상', session.list('awards'), PLANS.awards);
+        if (ok) await fillSubformList(session, block, '수상', session.list('awards'), PLANS.awards, 'awards');
         else if (session.list('awards').length) session.manual('수상', '수상', '같은 입력 폼의 자격증 항목을 먼저 저장해야 해서 입력하지 않았습니다. 해결 후 다시 실행해 주세요.');
       }
     } else if (/어학|외국어/.test(label)) {
-      await fillSubformList(session, block, '어학', session.list('languages'), PLANS.languages);
+      await fillSubformList(session, block, '어학', session.list('languages'), PLANS.languages, 'languages');
     } else if (/병역/.test(label) && session.profile.military.status) {
       const outcome = await runSubform(block, militaryPlan(session)).catch((error) => ({ ok: false, reason: error.message }));
       const status = !outcome.ok ? STATUS.FAILED : outcome.review ? STATUS.REVIEW : STATUS.FILLED;
