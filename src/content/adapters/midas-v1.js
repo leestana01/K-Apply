@@ -113,16 +113,7 @@
     const input = inRow(/^생년월일/, 'input[type="text"]')[0];
     if (!input) return;
     const value = text.formatDate(session.get('basic.birthdate'), 'YYYY.MM.DD');
-    await session.apply({
-      section: SECTION.basic,
-      label: '생년월일',
-      value,
-      filled: controls.hasValue(input),
-      run: async () => {
-        await controls.fillText(input, value);
-        return input.value === value;
-      },
-    });
+    await applyDate(session, { section: SECTION.basic, label: '생년월일', input, value });
   }
 
   async function fillGender(session) {
@@ -259,16 +250,8 @@
         if (value) session.manual(SECTION.military, placeholder, '입력 칸이 활성화되지 않았습니다.');
         continue;
       }
-      await session.apply({
-        section: SECTION.military,
-        label: placeholder,
-        value,
-        filled: controls.hasValue(input),
-        run: async () => {
-          await controls.fillText(input, value);
-          return input.value === value;
-        },
-      });
+      // 입대일·제대일은 월 단위(YYYY.MM) 입력 마스크를 쓰는 기업이 있다.
+      await applyDate(session, { section: SECTION.military, label: placeholder, input, value });
     }
 
     // 계급 · 제대구분 드롭다운은 선택 후 버튼 문구가 바뀌므로 순서로 찾는다.
