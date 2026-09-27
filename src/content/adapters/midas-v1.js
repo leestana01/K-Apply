@@ -320,6 +320,57 @@
 
   const urlInputs = () => visibleControls('input[name^="etcGroupResumeItemAnswers.socialMediaAnswerList."]').filter((input) => /\.address$/.test(input.name));
 
+  /**
+   * URL 종류 후보: 주소의 도메인으로 고르고, 맞는 종류가 없으면 '기타'.
+   * 선택지는 기업마다 다를 수 있어(예: 블로그·노션·티스토리·기타) 여러 표기를 우선순위대로 둔다.
+   */
+  function linkTypeCandidates(url, key) {
+    const host = (() => {
+      try {
+        return new URL(url).hostname.toLowerCase();
+      } catch (error) {
+        return '';
+      }
+    })();
+    const rules = [
+      [/(^|\.)tistory\.com$/, ['티스토리', '블로그']],
+      [/(^|\.)github\.(com|io)$/, ['GitHub', '깃허브']],
+      [/(^|\.)linkedin\.com$/, ['LinkedIn', '링크드인']],
+      [/(^|\.)(notion\.site|notion\.so)$/, ['노션', 'Notion']],
+      [/(^|\.)(youtube\.com|youtu\.be)$/, ['유튜브', 'YouTube']],
+      [/(^|\.)instagram\.com$/, ['인스타그램', 'Instagram']],
+      [/(^|\.)(twitter\.com|x\.com)$/, ['트위터', 'X']],
+      [/(^|\.)tiktok\.com$/, ['틱톡', 'TikTok']],
+      [/(^|\.)(velog\.io|blog\.naver\.com|brunch\.co\.kr|medium\.com)$/, ['블로그']],
+    ];
+    const matched = rules.find(([pattern]) => pattern.test(host));
+    const fromKey = { blog: ['블로그'], portfolio: ['포트폴리오'], github: ['GitHub', '깃허브'], linkedin: ['LinkedIn', '링크드인'] }[key] || [];
+    return [...new Set([...(matched ? matched[1] : []), ...fromKey, '기타'])];
+  }
+
+  /** URL 행의 종류 선택 버튼 */
+  function linkTypeTrigger(input) {
+    let row = input.parentElement;
+    while (row && row !== document.body && !visibleControls('button', row).some((button) => button.type === 'button')) row = row.parentElement;
+    return row && row !== document.body ? visibleControls('button', row).find((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button))) : null;
+  }
+
+  /** 종류가 선택되지 않은 상태: 안내 문구(link 등)만 보이는 경우 */
+  const linkTypeEmpty = (trigger) => !trigger || /^(link|링크|선택|종류)/i.test(dom.textOf(trigger)) || !dom.textOf(trigger);
+
+  async function applyLinkType(session, label, input, key) {
+    const trigger = linkTypeTrigger(input);
+    if (!trigger) return;
+    const candidates = linkTypeCandidates(input.value, key);
+    await session.apply({
+      section: SECTION.links,
+      label: `${label} 종류`,
+      value: candidates,
+      filled: !linkTypeEmpty(trigger),
+      run: () => controls.fillButtonDropdown(trigger, candidates),
+    });
+  }
+
   async function fillLinks(session) {
     const adder = inRow(/^URL$/i, 'button').find((button) => /추가하기/.test(dom.textOf(button)));
     if (!adder && !urlInputs().length) return;
@@ -327,14 +378,15 @@
       .map((key) => ({ key, value: String(session.get(`links.${key}`) || '').trim() }))
       .filter((link) => link.value);
     const labels = { portfolio: '포트폴리오', github: 'GitHub', blog: '블로그', linkedin: 'LinkedIn' };
-    const present = () => urlInputs().map((input) => text.normalize(input.value));
+    const find = (value) => urlInputs().find((input) => text.normalize(input.value) === text.normalize(value));
 
     for (const link of links) {
+      let target = find(link.value);
       await session.apply({
         section: SECTION.links,
         label: labels[link.key],
         value: link.value,
-        filled: present().includes(text.normalize(link.value)),
+        filled: !!target,
         run: async () => {
           let input = urlInputs().find((element) => !controls.hasValue(element) && !element.disabled);
           if (!input) {
@@ -347,11 +399,16 @@
             });
             if (!input) return { ok: false, reason: 'URL 행을 추가하지 못했습니다.' };
           }
+          target = input;
           return controls.fillText(input, link.value);
         },
       });
+      // 주소가 이미 있어도 종류가 비어 있으면 채운다(종류는 필수인 기업이 있다).
+      target = target || find(link.value);
+      if (target) await applyLinkType(session, labels[link.key], target, link.key);
     }
   }
+
 
   function checkApplySector(session) {
     const trigger = inRow(/^지원\s*분야/, 'button').find(isDropdown);
