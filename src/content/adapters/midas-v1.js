@@ -173,6 +173,7 @@
       postalCode: session.get('basic.postalCode'),
       address: session.get('basic.address'),
       jibunAddress: session.get('basic.jibunAddress'),
+      addressDetail: session.get('basic.addressDetail'),
     };
     if (text.isBlank(target.address)) {
       if (!text.isBlank(session.get('basic.addressDetail'))) {

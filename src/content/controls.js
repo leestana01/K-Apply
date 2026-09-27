@@ -610,17 +610,6 @@
     const search = button('검색');
     if (search) search.click();
     else dom.press(input, 'Enter');
-    const results = await dom.waitFor(
-      () => {
-        const items = [...dialog.querySelectorAll('li')].filter((item) => dom.isVisible(item) && /도로명/.test(dom.textOf(item)));
-        return items.length ? items : null;
-      },
-      { timeout: 8000, interval: 150 }
-    );
-    if (!results) {
-      await cancel();
-      return { ok: false, reason: '주소 검색 결과가 없습니다. 프로필의 도로명 주소를 확인해 주세요.' };
-    }
     // 결과 항목 텍스트: "도로명 <주소> 지번 <주소>" (순서는 달라도 된다)
     const valueAfter = (item, label) => {
       const match = dom.textOf(item).match(new RegExp(`${label}\\s*(.*?)(?=\\s*(?:도로명|지번)|$)`));
@@ -628,13 +617,38 @@
     };
     const wantedRoad = addressKey(target.address);
     const wantedJibun = target.jibunAddress ? addressKey(target.jibunAddress) : '';
-    const matches = results.filter((item) => {
-      const road = valueAfter(item, '도로명').replace(/\s*\([^)]*\)\s*$/, '');
-      if (addressKey(road) !== wantedRoad) return false;
-      if (!wantedJibun) return true;
-      // 지번 칸에는 건물명이 이어 붙기도 하므로 앞부분이 같은지 본다.
-      return addressKey(valueAfter(item, '지번')).startsWith(wantedJibun);
-    });
+    const matching = (items) =>
+      items.filter((item) => {
+        const road = valueAfter(item, '도로명').replace(/\s*\([^)]*\)\s*$/, '');
+        if (addressKey(road) !== wantedRoad) return false;
+        if (!wantedJibun) return true;
+        // 지번 칸에는 건물명이 이어 붙기도 하므로 앞부분이 같은지 본다.
+        return addressKey(valueAfter(item, '지번')).startsWith(wantedJibun);
+      });
+    // 검색 결과는 로딩 중 항목·이전 결과를 거쳐 채워지므로, 일치 항목이 하나 나오거나
+    // 목록이 1.5초 동안 바뀌지 않을 때까지 기다린 뒤 판단한다.
+    let signature = '';
+    let since = Date.now();
+    let items = [];
+    let matches = [];
+    await dom.waitFor(
+      () => {
+        items = [...dialog.querySelectorAll('li')].filter((item) => dom.isVisible(item) && /도로명/.test(dom.textOf(item)));
+        const current = items.map(dom.textOf).join('|');
+        if (current !== signature) {
+          signature = current;
+          since = Date.now();
+        }
+        matches = matching(items);
+        const settled = Date.now() - since >= 1500;
+        return matches.length === 1 && Date.now() - since >= 300 ? true : settled && items.length ? true : null;
+      },
+      { timeout: 10000, interval: 150 }
+    );
+    if (!items.length) {
+      await cancel();
+      return { ok: false, reason: '주소 검색 결과가 없습니다. 프로필의 도로명 주소를 확인해 주세요.' };
+    }
     if (matches.length !== 1) {
       await cancel();
       return {
@@ -643,7 +657,14 @@
       };
     }
     matches[0].click();
-    await dom.sleep(200);
+    await dom.sleep(300);
+    // 결과를 고르면 창 안에 상세주소 칸이 나타나는 경우가 있다. 있으면 여기서 넣는다.
+    const detail = [...dialog.querySelectorAll('input[type="text"]')].find((node) => dom.isVisible(node) && /상세\s*주소/.test(node.getAttribute('placeholder') || ''));
+    if (detail && target.addressDetail && !hasValue(detail)) {
+      detail.focus({ preventScroll: true });
+      insertText(detail, target.addressDetail);
+      await dom.sleep(100);
+    }
     const confirm = button('확인');
     if (!confirm) {
       await cancel();
