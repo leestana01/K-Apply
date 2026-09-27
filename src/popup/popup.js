@@ -81,7 +81,8 @@
       .forEach((entry) => {
         const tone = entry.status === 'failed' ? 'err' : entry.status === 'filled' ? null : 'warn';
         const prefix = entry.status === 'failed' ? '실패 · ' : entry.status === 'filled' ? '' : '확인 · ';
-        list.appendChild(el('li', tone, `${prefix}${entry.label}${entry.detail ? ` — ${entry.detail}` : ''}`));
+        const title = entry.section && entry.section !== entry.label ? `${entry.section} · ${entry.label}` : entry.label;
+        list.appendChild(el('li', tone, `${prefix}${title}${entry.detail ? ` — ${entry.detail}` : ''}`));
       });
     notices.forEach((notice) => list.appendChild(el('li', 'muted', notice)));
     if (list.childElementCount) box.appendChild(list);
