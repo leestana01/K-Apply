@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-27
+
+### 추가
+
+- 마이다스인 새 지원서 화면의 **어학/자격/기타 단계**: 공인외국어시험(시험명 검색, 등록 번호, 응시일, 점수 또는 등급), 자격증(자격증명 검색, 발행 기관, 취득일, 자격 번호), 수상경력, 학내외활동
+- YBM 성적 연동 기업에서 TOEIC 등을 고를 때 열리는 YBM 로그인 창을 막고 직접 인증을 안내(페이지 브리지의 외부 인증 창 차단)
+- 검색형 입력에서 괄호 속 부가 명칭 매칭(예: `SQLD` → `SQLD(SQL개발자)`, 확인 필요로 표시), OPIc 등급 약어 동의어(IM2 = Intermediate Mid 2)
+- 개수 제한("대표 1건만" 등)으로 넣지 못한 항목을 한 줄로 안내
+
+### 수정
+
+- 검색 결과보다 먼저 뜨는 "'검색어'등록하기" 항목을 결과 도착 전에 고르던 문제
+- 월 단위 입력 마스크(YYYY.MM)가 일자를 잘라내는 날짜 칸을 실패로 보던 문제
+
 ## [1.4.0] - 2026-09-27
 
 ### 추가
@@ -97,7 +111,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/leestana01/K-Apply/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/leestana01/K-Apply/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/leestana01/K-Apply/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/leestana01/K-Apply/compare/v1.1.1...v1.2.0
