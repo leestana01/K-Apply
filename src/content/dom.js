@@ -120,7 +120,25 @@
     return null;
   }
 
+  /**
+   * 영역 안에서 기업이 적어 둔 안내 문구만 모은다(입력칸·버튼·선택지 텍스트 제외).
+   * 사용자가 입력한 값은 textContent에 나타나지 않으므로 섞이지 않는다.
+   */
+  function guidanceText(container) {
+    if (!container) return '';
+    const clone = container.cloneNode(true);
+    clone.querySelectorAll('input, textarea, select, option, button, ul, [role="listbox"]').forEach((node) => node.remove());
+    return textOf(clone);
+  }
+
+  /** 영역의 안내 문구에 적힌 작성 개수 제한("대표 1가지만", "최대 3건"). 없으면 null. */
+  function countLimitOf(container) {
+    return globalThis.KApply.text.parseCountLimit(guidanceText(container));
+  }
+
   KApply.dom = {
+    guidanceText,
+    countLimitOf,
     sleep,
     waitFor,
     setNativeValue,

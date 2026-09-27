@@ -44,6 +44,16 @@
     'military.disability': 'targetFlag',
   };
 
+  /** 목록 항목의 표시 이름: 스키마의 요약 필드 중 첫 번째 값 */
+  function entryTitle(sectionId, entry) {
+    const section = (KApply.schema.SECTIONS || []).find((item) => item.id === sectionId);
+    const keys = (section && section.summary) || ['name'];
+    for (const key of keys) {
+      if (!text.isBlank(entry && entry[key])) return String(entry[key]).trim();
+    }
+    return '';
+  }
+
   class Report {
     constructor() {
       this.entries = [];
@@ -160,6 +170,27 @@
 
     manual(section, label, detail) {
       this.report.add(STATUS.MANUAL, section, label, detail);
+    }
+
+    /**
+     * 지원서가 받는 개수를 넘어 넣지 못한 목록 항목을 한 줄로 알린다.
+     * 받는 개수는 기업마다 다르므로(대표 1건, 최대 3건 등) 가정하지 않고, 사이트가 더 받지 않을 때 호출한다.
+     * @param {string} section
+     * @param {string} sectionId 프로필 목록 id (educations, awards …) — 항목 이름 표시에 사용
+     * @param {object[]} entries 넣지 못한 항목
+     * @param {number} [accepted] 지원서에 들어간 개수(알 수 있을 때)
+     */
+    overflow(section, sectionId, entries, accepted) {
+      if (!entries.length) return;
+      const names = entries.map((entry) => entryTitle(sectionId, entry)).filter(Boolean);
+      const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` 외 ${names.length - 3}건` : '');
+      const limit = Number.isInteger(accepted) && accepted > 0 ? `이 지원서는 ${accepted}건까지 받습니다. ` : '';
+      this.report.add(
+        STATUS.MANUAL,
+        section,
+        `입력하지 않은 ${entries.length}건`,
+        `${limit}더 추가할 수 없어 ${shown ? `${shown}을(를) ` : ''}넣지 않았습니다. 프로필 순서대로 채우므로, 대표로 낼 항목은 옵션 화면에서 위로 옮겨 주세요.`
+      );
     }
 
     /** 등록된 첨부 파일의 메타데이터 (없으면 null) */

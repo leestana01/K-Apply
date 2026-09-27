@@ -420,11 +420,22 @@
     return null;
   }
 
+  /** 목록 전체 영역: [항목 추가] 버튼과 첫 항목을 함께 포함하는 가장 가까운 조상 */
+  function listContainer(button, list) {
+    const first = document.querySelector(`[name^="${CSS.escape(entryPrefix(list, 0))}"]`);
+    let node = button.parentElement;
+    while (node && node !== document.body && !(first && node.contains(first))) node = node.parentElement;
+    return node && node !== document.body ? node : null;
+  }
+
   async function ensureEntry(list, index) {
     if (entryExists(list, index)) return true;
     if (list.single || index === 0) return false;
     const button = findAddButton(list, index);
     if (!button) return false;
+    // 공고마다 받는 개수가 다르다. 버튼이 있어도 목록 안내 문구("최대 3개" 등)를 넘으면 추가하지 않는다.
+    const limit = dom.countLimitOf(listContainer(button, list));
+    if (limit && index >= limit) return false;
     button.click();
     return !!(await dom.waitFor(() => entryExists(list, index), { timeout: 2000 }));
   }
@@ -432,13 +443,15 @@
   async function fillList(session, list) {
     const entries = session.list(list.source).filter(list.filter || (() => true));
     if (!entries.length || !entryExists(list, 0)) return;
+    // 받는 개수는 공고마다 다르다. 단일 항목(고등학교 등)이면 첫 항목만, 목록이면 [항목 추가]가 되는 만큼 넣는다.
     const limit = list.single ? 1 : entries.length;
+    if (list.single) session.overflow(list.title, list.source, entries.slice(1), 1);
     for (let index = 0; index < limit; index += 1) {
       const entry = entries[index];
       const label = `${list.title} ${list.single ? '' : index + 1}`.trim();
       if (!(await ensureEntry(list, index))) {
-        session.manual(list.title, label, '항목을 추가하지 못했습니다. 직접 추가해 주세요.');
-        continue;
+        session.overflow(list.title, list.source, entries.slice(index), index);
+        break;
       }
       const prefix = entryPrefix(list, index);
       const keyElement = document.querySelector(`[name="${CSS.escape(prefix + list.key)}"]`);

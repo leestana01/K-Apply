@@ -277,6 +277,17 @@
     });
   }
 
+  /** 이 반복 항목만 포함하는 가장 넓은 영역(다른 반복 항목의 행을 포함하기 직전까지) */
+  function loopArea(start, loop) {
+    let node = start && start.parentElement;
+    while (node && node.parentElement && node.parentElement !== document.body) {
+      const others = [...node.parentElement.querySelectorAll('div[data-loop]')].some((row) => row.getAttribute('data-loop') !== loop);
+      if (others) break;
+      node = node.parentElement;
+    }
+    return node;
+  }
+
   async function ensureRow(loop, index, scope = document) {
     let rows = rowsOf(loop, scope);
     if (rows.length > index) return rows[index];
@@ -288,6 +299,9 @@
         (last && [...last.querySelectorAll('[data-button="add"]')].find((button) => button.closest('div[data-loop]') === last)) ||
         document.querySelector(`[data-button="addCollege"][data-loopname="${CSS.escape(loop)}"]`);
       if (!add) return null;
+      // 받는 행 수는 기업 설정마다 다르다. [+]가 있어도 이 항목 영역의 안내 문구("최대 3건" 등)를 넘으면 추가하지 않는다.
+      const limit = dom.countLimitOf(loopArea(last || add, loop));
+      if (limit && rows.length >= limit) return null;
       const before = rows.length;
       add.click();
       const grown = await dom.waitFor(() => rowsOf(loop, scope).length > before, { timeout: 2000 });
@@ -323,14 +337,15 @@
    * @param {(entry:object)=>Array<[string,string,object]>} options.plan [필드, 라벨, spec] 배열
    * @param {(row:HTMLElement, entry:object, index:number)=>Promise<void>} [options.after]
    */
-  async function fillLoop(session, { loop, title, entries, plan, after }) {
+  async function fillLoop(session, { loop, title, source, entries, plan, after }) {
     if (!entries.length || rowsOf(loop).length === 0) return;
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index];
       const rowLabel = `${title} ${index + 1}`;
       const row = await ensureRow(loop, index);
       if (!row) {
-        session.manual(title, rowLabel, '행을 추가하지 못했습니다. [+] 버튼으로 직접 추가해 주세요.');
+        // 받는 행 수는 기업 설정마다 다르다. 더 추가되지 않으면 나머지를 한 번에 알린다.
+        session.overflow(title, source, entries.slice(index), index);
         break;
       }
       const steps = plan(entry);
@@ -452,6 +467,7 @@
       await fillLoop(session, {
         loop,
         title,
+        source: 'educations',
         entries,
         plan: collegePlan,
         after: (row, entry, index) => fillCollegeMajor(session, row, entry, index, title),
@@ -606,7 +622,7 @@
     await fillColleges(session);
     for (const definition of LOOPS) {
       const entries = session.list(definition.source).filter(definition.filter || (() => true));
-      await fillLoop(session, { loop: definition.loop, title: definition.title, entries, plan: definition.plan });
+      await fillLoop(session, { loop: definition.loop, title: definition.title, source: definition.source, entries, plan: definition.plan });
     }
 
     await noticeAttachments(session);
