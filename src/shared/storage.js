@@ -28,6 +28,8 @@
     showLauncher: true,
     /** 이미 값이 있는 칸도 덮어쓰기 */
     overwrite: false,
+    /** 목록 항목을 지원서에 넣는 순서: recent(최신순) | oldest(오래된순). 어떤 항목을 넣을지는 우선순위로 정한다. */
+    entryOrder: 'recent',
   });
 
   function area() {
@@ -51,6 +53,7 @@
     return {
       showLauncher: typeof stored.showLauncher === 'boolean' ? stored.showLauncher : DEFAULT_SETTINGS.showLauncher,
       overwrite: typeof stored.overwrite === 'boolean' ? stored.overwrite : DEFAULT_SETTINGS.overwrite,
+      entryOrder: stored.entryOrder === 'oldest' || stored.entryOrder === 'recent' ? stored.entryOrder : DEFAULT_SETTINGS.entryOrder,
     };
   }
 

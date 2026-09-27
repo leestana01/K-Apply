@@ -49,6 +49,13 @@
             <input type="checkbox" id="setting-overwrite" />
             <span>이미 값이 있는 칸도 덮어쓰기 <span class="muted">(첨부 파일은 제외 — 기존 파일은 항상 유지)</span></span>
           </label>
+          <label class="setting-row">
+            <span>목록 항목 입력 순서 <span class="muted">(경력·활동·수상 등. 어떤 항목을 넣을지는 우선순위로 정함)</span></span>
+            <select id="setting-order">
+              <option value="recent">최신순 (최근 항목이 위)</option>
+              <option value="oldest">오래된순 (오래된 항목이 위)</option>
+            </select>
+          </label>
           <p class="muted small">
             단축키는 <a href="#" id="shortcut-link">chrome://extensions/shortcuts</a>에서 바꿀 수 있습니다.
           </p>
