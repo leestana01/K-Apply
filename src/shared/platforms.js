@@ -71,7 +71,9 @@
           !!doc.querySelector('script[src*="/mit-common/"], script[src*="midas."], script[src*="/mrs2/"]')
         );
       },
-      hasForm(doc) {
+      hasForm(doc, loc) {
+        // 새 화면의 학력·경력 단계는 항목을 추가하기 전까지 name 있는 입력칸이 없으므로 경로로도 판단한다.
+        if (/\/v1\/applicant\/resume-form\//.test(String((loc && loc.pathname) || ''))) return true;
         return !!doc.querySelector(
           '#emailConfirm, #mobile1, [name="genderFlag"], [name="englishName"], [data-loop], [data-wrap], [name^="highschool."], [name^="military."], ' +
             // 새 버전(/v1/applicant/resume-form): react-hook-form 경로형 name
@@ -85,14 +87,14 @@
 
   /**
    * @param {Document} doc
-   * @param {{hostname:string}} loc
+   * @param {{hostname:string, pathname?:string}} loc
    * @returns {{id:string,name:string,formReady:boolean}|null}
    */
   function detect(doc, loc) {
     const host = String((loc && loc.hostname) || '').toLowerCase();
     for (const platform of PLATFORMS) {
       if (platform.isPlatform(doc, host)) {
-        return { id: platform.id, name: platform.name, formReady: platform.hasForm(doc) };
+        return { id: platform.id, name: platform.name, formReady: platform.hasForm(doc, loc) };
       }
     }
     return null;
