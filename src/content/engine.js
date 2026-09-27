@@ -54,21 +54,24 @@
     return '';
   }
 
-  /** 목록별 날짜 기준 필드(시작일 또는 취득일) */
-  const DATE_KEYS = {
-    educations: 'startDate',
-    careers: 'startDate',
-    projects: 'startDate',
-    activities: 'startDate',
-    trainings: 'startDate',
-    languages: 'date',
-    certificates: 'date',
-    awards: 'date',
-  };
-
-  function dateValue(sectionId, entry) {
-    const parsed = text.parseDate(entry && entry[DATE_KEYS[sectionId]]);
-    return parsed ? parsed.y * 10000 + parsed.m * 100 + (parsed.d || 0) : null;
+  /**
+   * 정렬에 쓸 날짜 값(YYYYMMDD 숫자). 종료일 기준에서 진행 중(재직 중·종료일 없음)이면 가장 최근으로 본다.
+   * 날짜가 없으면 null.
+   */
+  function dateValue(sectionId, entry, sortKey) {
+    const dates = (KApply.schema.SORT_DATES || {})[sectionId] || {};
+    const toNumber = (value) => {
+      const parsed = text.parseDate(value);
+      return parsed ? parsed.y * 10000 + parsed.m * 100 + (parsed.d || 0) : null;
+    };
+    if (dates.single) return toNumber(entry[dates.single]);
+    if (sortKey === 'end') {
+      const end = toNumber(entry[dates.end]);
+      if (end !== null) return end;
+      const ongoing = (dates.ongoing && entry[dates.ongoing] === true) || (toNumber(entry[dates.start]) !== null && text.isBlank(entry[dates.end]));
+      return ongoing ? Number.MAX_SAFE_INTEGER : null;
+    }
+    return toNumber(entry[dates.start]);
   }
 
   class Report {
@@ -186,13 +189,15 @@
     }
 
     /**
-     * 넣을 항목을 날짜순으로 정렬한 복사본. 어떤 항목을 넣을지는 우선순위(목록 순서)로 먼저 고르고,
-     * 고른 항목을 넣는 순서만 날짜로 정한다. 날짜가 없는 항목은 우선순위 순서로 뒤에 둔다.
+     * 넣을 항목을 날짜로 정렬한 복사본. 어떤 항목을 넣을지는 우선순위(목록 순서)로 먼저 고르고,
+     * 고른 항목을 넣는 순서만 설정의 정렬 기준(시작일·종료일, 날짜가 하나인 목록은 그 날짜)과
+     * 방향(최신순·오래된순)으로 정한다. 날짜가 없는 항목은 우선순위 순서로 뒤에 둔다.
      */
     chronological(sectionId, entries) {
       const recent = this.settings.entryOrder !== 'oldest';
+      const sortKey = this.settings.entrySortKey === 'end' ? 'end' : 'start';
       return entries
-        .map((entry, rank) => ({ entry, rank, date: dateValue(sectionId, entry) }))
+        .map((entry, rank) => ({ entry, rank, date: dateValue(sectionId, entry, sortKey) }))
         .sort((a, b) => {
           if (a.date === null || b.date === null) return a.date === null && b.date === null ? a.rank - b.rank : a.date === null ? 1 : -1;
           return a.date === b.date ? a.rank - b.rank : recent ? b.date - a.date : a.date - b.date;

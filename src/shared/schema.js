@@ -387,6 +387,31 @@
 
   const SECTION_BY_ID = Object.fromEntries(SECTIONS.map((section) => [section.id, section]));
 
+  /**
+   * 목록별 정렬 날짜 필드. 기간이 있는 목록은 시작·종료일, 날짜가 하나인 목록은 그 날짜만 있다.
+   * label은 화면 안내에 쓴다.
+   */
+  const SORT_DATES = {
+    educations: { start: 'startDate', end: 'endDate' },
+    careers: { start: 'startDate', end: 'endDate', ongoing: 'current' },
+    projects: { start: 'startDate', end: 'endDate' },
+    activities: { start: 'startDate', end: 'endDate' },
+    trainings: { start: 'startDate', end: 'endDate' },
+    languages: { single: 'date', label: '응시일' },
+    certificates: { single: 'date', label: '취득일' },
+    awards: { single: 'date', label: '수상일' },
+  };
+
+  const SORT_KEY_LABEL = { start: '시작일', end: '종료일' };
+  const SORT_ORDER_LABEL = { recent: '최신순', oldest: '오래된순' };
+
+  /** 현재 설정으로 이 목록을 정렬하는 기준을 사람이 읽을 수 있게: "종료일 · 최신순" */
+  function describeSort(sectionId, settings) {
+    const dates = SORT_DATES[sectionId] || {};
+    const key = dates.single ? dates.label : SORT_KEY_LABEL[settings.entrySortKey] || SORT_KEY_LABEL.start;
+    return `${key} · ${SORT_ORDER_LABEL[settings.entryOrder] || SORT_ORDER_LABEL.recent}`;
+  }
+
   function emptyEntry(section) {
     const entry = {};
     section.fields.forEach((field) => {
@@ -457,6 +482,10 @@
 
   KApply.schema = {
     SECTIONS,
+    SORT_DATES,
+    SORT_KEY_LABEL,
+    SORT_ORDER_LABEL,
+    describeSort,
     REGIONS,
     SECTION_BY_ID,
     FILE_SLOTS,
