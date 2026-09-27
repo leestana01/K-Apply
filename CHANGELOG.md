@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-27
+
+### 추가
+
+- 목록 항목 **정렬 기준** 선택: 시작일 / 종료일(수상·자격증·어학은 수상일·취득일·응시일). 종료일 기준에서 진행 중인 항목은 가장 최근으로 정렬
+- 정렬 기준·방향을 버튼으로 고르는 설정을 옵션 화면과 **툴바 팝업**(채용 페이지에서 실행 전 변경) 양쪽에 제공
+
+### 변경
+
+- 목록 순위 안내 문구가 "입력 순서로 고정"처럼 읽히던 문제: 현재 정렬 설정(예: "종료일 · 최신순")을 그대로 보여 주도록 수정
+- 옵션의 "목록 항목 입력 순서" 선택 상자를 정렬 기준·방향 버튼으로 교체
+
 ## [1.8.1] - 2026-09-27
 
 ### 수정
@@ -151,7 +163,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/leestana01/K-Apply/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/leestana01/K-Apply/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/leestana01/K-Apply/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/leestana01/K-Apply/compare/v1.6.0...v1.7.0
