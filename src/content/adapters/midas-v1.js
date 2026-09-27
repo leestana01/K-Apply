@@ -800,10 +800,36 @@
    * 새로 넣을 항목 수(want)만큼 빈 검색 행을 미리 확보하고 확보한 수를 돌려준다.
    * 받는 개수는 기업마다 다르므로, 사이트가 더 받지 않거나 안내 문구의 개수에 이르면 멈춘다.
    */
-  async function reserveSearchRows(pattern, search, want, filled) {
+  async function reserveSearchRows(pattern, search, want, filled, created = []) {
     let free = visibleControls(search).length;
-    while (free < want && (await addSearchRow(pattern, search, filled() + free))) free += 1;
+    while (free < want) {
+      const input = await addSearchRow(pattern, search, filled() + free);
+      if (!input) break;
+      created.push(input);
+      free += 1;
+    }
     return Math.min(free, want);
+  }
+
+  /**
+   * 미리 만들었지만 쓰지 않은(선택 실패 등) 빈 행을 지운다. 빈 필수 행이 남으면 다음 단계로 넘어갈 수 없다.
+   * 행의 삭제(−) 버튼은 지원서 저장을 함께 하므로, 확장프로그램이 만든 행에만 쓴다.
+   */
+  async function removeUnusedRows(created, search) {
+    let removed = 0;
+    for (const input of created) {
+      if (!input.isConnected || !input.matches(search) || controls.hasValue(input) || !dom.isVisible(input)) continue;
+      let row = input.parentElement;
+      const submitButtons = (node) => [...node.querySelectorAll('button')].filter((button) => button.type === 'submit' && dom.isVisible(button) && !dom.textOf(button));
+      while (row && row.tagName !== 'FORM' && row !== document.body && !submitButtons(row).length) row = row.parentElement;
+      if (!row || row.tagName === 'FORM' || row === document.body) continue;
+      // 이 행만 포함하는지 확인한다(다른 행의 입력칸이 있으면 누르지 않는다).
+      if (row.querySelectorAll('input[name]').length || row.querySelectorAll(search).length !== 1 || submitButtons(row).length !== 1) continue;
+      submitButtons(row)[0].click();
+      await dom.sleep(900);
+      if (!input.isConnected) removed += 1;
+    }
+    return removed;
   }
 
   /** 검색 칸이 속한 행: 선택 후 나타나는 입력칸(name에 index 포함)을 함께 가진 가장 가까운 조상 */
@@ -912,7 +938,8 @@
     }
 
     // 받는 개수만큼 행을 확보하고, 우선순위 상위 항목을 날짜순으로 넣는다.
-    const capacity = await reserveSearchRows(/^공인\s*외국어/, EXAM_SEARCH, pending.length, () => registers().length);
+    const created = [];
+    const capacity = await reserveSearchRows(/^공인\s*외국어/, EXAM_SEARCH, pending.length, () => registers().length, created);
     session.overflow('어학', 'languages', pending.slice(capacity), registers().length + capacity);
     for (const entry of session.chronological('languages', pending.slice(0, capacity))) {
       const names = examNames(entry);
@@ -927,13 +954,22 @@
         options: { names },
         guard: true,
       });
-      if (chosen.status === STATUS.FAILED || chosen.status === 'limited' || !chosen.anchor) continue;
+      if (chosen.status === 'limited') {
+        session.manual(section, '시험명', `'${names[0]}'을(를) 넣을 빈 행을 찾지 못했습니다. [추가하기]로 행을 만든 뒤 직접 입력해 주세요.`);
+        continue;
+      }
+      if (chosen.status === STATUS.FAILED) continue;
+      if (!chosen.anchor) {
+        session.manual(section, '시험 세부 항목', `'${names[0]}'을(를) 골랐지만 등록 번호·응시일 칸이 나타나지 않았습니다. 직접 입력해 주세요.`);
+        continue;
+      }
       if (chosen.extra.blocked !== 0 || chosen.anchor.disabled) {
         session.manual(section, '성적 인증', 'YBM 성적 인증을 거쳐야 점수가 입력되는 시험입니다. 시험을 지운 뒤 다시 선택해 인증 창에서 인증해 주세요.');
         continue;
       }
       await fillExamFields(session, section, chosen.anchor, entry);
     }
+    await removeUnusedRows(created, EXAM_SEARCH);
   }
 
   async function fillLicenseFields(session, section, organization, entry) {
@@ -941,7 +977,12 @@
     const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
     await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
     await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
-    await applyText(session, { section, label: '자격 번호', input: document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`), value: entry.number });
+    const register = document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`);
+    if (!register && !text.isBlank(entry.number)) {
+      session.manual(section, '자격 번호', `이 행에는 자격 번호 칸이 없어(목록에 없는 자격증을 직접 등록한 경우) '${entry.number}'을(를) 넣지 못했습니다. 목록에서 자격증을 다시 골라 주세요.`);
+      return;
+    }
+    await applyText(session, { section, label: '자격 번호', input: register, value: entry.number });
   }
 
   async function fillLicenses(session) {
@@ -957,7 +998,8 @@
       else pending.push(entry);
     }
 
-    const capacity = await reserveSearchRows(/^자격증/, LICENSE_SEARCH, pending.length, () => organizations().length);
+    const created = [];
+    const capacity = await reserveSearchRows(/^자격증/, LICENSE_SEARCH, pending.length, () => organizations().length, created);
     session.overflow('자격증', 'certificates', pending.slice(capacity), organizations().length + capacity);
     for (const entry of session.chronological('certificates', pending.slice(0, capacity))) {
       const section = `자격증 · ${entry.name}`;
@@ -970,9 +1012,18 @@
         anchors: organizations,
         options: { register: 'review', alias: true },
       });
-      if (chosen.status === STATUS.FAILED || chosen.status === 'limited' || !chosen.anchor) continue;
+      if (chosen.status === 'limited') {
+        session.manual(section, '자격증명', `'${entry.name}'을(를) 넣을 빈 행을 찾지 못했습니다. [추가하기]로 행을 만든 뒤 직접 입력해 주세요.`);
+        continue;
+      }
+      if (chosen.status === STATUS.FAILED) continue;
+      if (!chosen.anchor) {
+        session.manual(section, '자격증 세부 항목', `'${entry.name}'을(를) 골랐지만 발행 기관·취득일 칸이 나타나지 않았습니다. 직접 입력해 주세요.`);
+        continue;
+      }
       await fillLicenseFields(session, section, chosen.anchor, entry);
     }
+    await removeUnusedRows(created, LICENSE_SEARCH);
   }
 
   async function fillAwards(session) {
