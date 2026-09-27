@@ -539,6 +539,122 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 마이다스인 새 버전(/v1/applicant) 컴포넌트
+  // ---------------------------------------------------------------------------
+
+  /** 드롭다운 트리거가 연 목록: 검색창과 li > button[value] 항목을 가진 ul */
+  function openListbox(trigger) {
+    return [...document.querySelectorAll('ul')].find(
+      (list) => dom.isVisible(list) && !list.contains(trigger) && list.querySelector('li button[value]')
+    );
+  }
+
+  /**
+   * 드롭다운 버튼: 목록을 열어 항목을 고른다. 목록에 남는 검색 필터를 피하려고 전체 목록에서 먼저 찾는다.
+   * @param {HTMLButtonElement} trigger
+   * @param {string[]} candidates
+   */
+  async function fillButtonDropdown(trigger, candidates) {
+    if (!openListbox(trigger)) trigger.click();
+    const list = await dom.waitFor(() => openListbox(trigger), { timeout: 2000 });
+    if (!list) return { ok: false, reason: '선택 목록이 열리지 않았습니다.' };
+    const items = [...list.querySelectorAll('li button[value]')].filter((item) => !/선택\s*안\s*함/.test(dom.textOf(item)));
+    const index = text.pickOption(items.map(dom.textOf), candidates);
+    if (index < 0) {
+      trigger.click();
+      await dom.sleep(150);
+      return missingOption(items.map(dom.textOf), candidates);
+    }
+    const chosen = dom.textOf(items[index]);
+    items[index].click();
+    await dom.sleep(250);
+    return text.normalize(dom.textOf(trigger)) === text.normalize(chosen) ? true : { ok: false, reason: '선택한 항목이 반영되지 않았습니다.' };
+  }
+
+  /** 버튼형 선택(비대상|군필|…): 선택된 버튼은 흰 배경 인라인 스타일로 표시된다. */
+  function segmentSelected(button) {
+    return /background-color:\s*(white|rgb\(255,\s*255,\s*255\))/.test(button.getAttribute('style') || '');
+  }
+
+  async function fillSegment(buttons, candidates) {
+    const usable = buttons.filter((button) => !button.disabled);
+    const index = text.pickOption(usable.map(dom.textOf), candidates);
+    if (index < 0) return missingOption(usable.map(dom.textOf), candidates);
+    if (!segmentSelected(usable[index])) {
+      usable[index].click();
+      await dom.sleep(250);
+    }
+    return segmentSelected(usable[index]);
+  }
+
+  /**
+   * 주소 입력 창(도로명주소 검색): 검색 → 도로명 주소(괄호 속 참고항목 제외)와 지번 주소가 같은 결과 선택 → 확인.
+   * 결과 목록에 우편번호가 표시되지 않으므로, 선택 후 채워진 우편번호를 호출하는 쪽에서 검증한다.
+   */
+  async function fillAddressDialog(opener, target) {
+    opener.click();
+    const dialog = await dom.waitFor(() =>
+      [...document.querySelectorAll('[role="dialog"]')].find((node) => dom.isVisible(node) && node.querySelector('input[type="text"]'))
+    );
+    if (!dialog) return { ok: false, reason: '주소 입력 창이 열리지 않았습니다.' };
+    const button = (label) => [...dialog.querySelectorAll('button')].find((node) => dom.textOf(node) === label);
+    const cancel = async () => {
+      const node = button('취소');
+      if (node) node.click();
+      await dom.sleep(200);
+    };
+    const input = dialog.querySelector('input[type="text"]');
+    input.focus({ preventScroll: true });
+    dom.fire(input, 'focusin');
+    insertText(input, target.address);
+    const search = button('검색');
+    if (search) search.click();
+    else dom.press(input, 'Enter');
+    const results = await dom.waitFor(
+      () => {
+        const items = [...dialog.querySelectorAll('li')].filter((item) => dom.isVisible(item) && /도로명/.test(dom.textOf(item)));
+        return items.length ? items : null;
+      },
+      { timeout: 8000, interval: 150 }
+    );
+    if (!results) {
+      await cancel();
+      return { ok: false, reason: '주소 검색 결과가 없습니다. 프로필의 도로명 주소를 확인해 주세요.' };
+    }
+    // 결과 항목 텍스트: "도로명 <주소> 지번 <주소>" (순서는 달라도 된다)
+    const valueAfter = (item, label) => {
+      const match = dom.textOf(item).match(new RegExp(`${label}\\s*(.*?)(?=\\s*(?:도로명|지번)|$)`));
+      return match ? match[1].trim() : '';
+    };
+    const wantedRoad = addressKey(target.address);
+    const wantedJibun = target.jibunAddress ? addressKey(target.jibunAddress) : '';
+    const matches = results.filter((item) => {
+      const road = valueAfter(item, '도로명').replace(/\s*\([^)]*\)\s*$/, '');
+      if (addressKey(road) !== wantedRoad) return false;
+      if (!wantedJibun) return true;
+      // 지번 칸에는 건물명이 이어 붙기도 하므로 앞부분이 같은지 본다.
+      return addressKey(valueAfter(item, '지번')).startsWith(wantedJibun);
+    });
+    if (matches.length !== 1) {
+      await cancel();
+      return {
+        ok: false,
+        reason: matches.length ? '같은 도로명 주소의 결과가 여러 개라 고르지 않았습니다. 지번 주소를 프로필에 입력해 주세요.' : '검색 결과에서 도로명 주소가 정확히 같은 항목을 찾지 못했습니다.',
+      };
+    }
+    matches[0].click();
+    await dom.sleep(200);
+    const confirm = button('확인');
+    if (!confirm) {
+      await cancel();
+      return { ok: false, reason: '확인 버튼을 찾지 못했습니다.' };
+    }
+    confirm.click();
+    await dom.sleep(400);
+    return { ok: true };
+  }
+
+  // ---------------------------------------------------------------------------
   // 마이다스인 (jQuery + Dates 플러그인)
   // ---------------------------------------------------------------------------
 
@@ -614,6 +730,10 @@
     fillToggleGroup,
     fillGreetingAddress,
     fillPostcodify,
+    fillButtonDropdown,
+    fillSegment,
+    segmentSelected,
+    fillAddressDialog,
     addressKey,
     fillAntDropdown,
     fillAntDate,

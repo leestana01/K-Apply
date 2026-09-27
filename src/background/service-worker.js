@@ -19,6 +19,7 @@ const ENGINE_FILES = [
   'src/content/engine.js',
   'src/content/adapters/greeting.js',
   'src/content/adapters/ninehire.js',
+  'src/content/adapters/midas-v1.js',
   'src/content/adapters/midas.js',
   'src/content/runner.js',
 ];
