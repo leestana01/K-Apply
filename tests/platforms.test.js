@@ -50,3 +50,11 @@ test('describe: 배지 정보를 돌려준다', () => {
   assert.deepEqual(Object.keys(platforms.describe('greeting')).sort(), ['badge', 'color', 'id', 'name']);
   assert.equal(platforms.describe('unknown'), null);
 });
+
+test('마이다스인 새 지원서 화면(/v1/applicant)을 입력 양식으로 인식한다', () => {
+  const doc = fakeDocument({ selectors: ['[name^="basicInfoGroupAnswers."]'] });
+  const result = platforms.detect(doc, { hostname: 'iprovest.recruiter.co.kr' });
+  assert.equal(result.id, 'midas');
+  assert.equal(result.formReady, true);
+  assert.equal(platforms.detect(fakeDocument(), { hostname: 'iprovest.recruiter.co.kr' }).formReady, false);
+});

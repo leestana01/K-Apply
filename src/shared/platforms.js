@@ -73,7 +73,9 @@
       },
       hasForm(doc) {
         return !!doc.querySelector(
-          '#emailConfirm, #mobile1, [name="genderFlag"], [name="englishName"], [data-loop], [data-wrap], [name^="highschool."], [name^="military."]'
+          '#emailConfirm, #mobile1, [name="genderFlag"], [name="englishName"], [data-loop], [data-wrap], [name^="highschool."], [name^="military."], ' +
+            // 새 버전(/v1/applicant/resume-form): react-hook-form 경로형 name
+            '[name^="basicInfoGroupAnswers."], [name*="GroupAnswers."], [name*="GroupResumeItemAnswers."]'
         );
       },
     },
