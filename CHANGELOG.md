@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-27
+
+### 추가
+
+- 목록 항목의 **개수 제한을 모든 솔루션에서 같은 규칙으로 처리**: 프로필 순서대로 넣고, 사이트가 더 받지 않거나 항목 안내 문구의 개수("대표 1가지만", "최대 3건", "5개까지")에 이르면 멈춘 뒤 넣지 못한 항목을 "입력하지 않은 N건" 한 줄로 안내
+
+### 수정
+
+- 그리팅: 한 건만 받는 목록(고등학교 등)에서 두 번째 이후 항목을 안내 없이 버리던 문제
+- 그리팅: 항목 추가에 실패하면 남은 항목마다 같은 안내를 반복하던 문제
+- 마이다스인(기존 화면): 행 추가에 실패했을 때 넣지 못한 항목 수를 알리지 않던 문제
+- 마이다스인 새 화면: 어학·자격증 행을 더 추가할 수 없을 때 항목마다 따로 안내하던 문제
+
 ## [1.5.0] - 2026-09-27
 
 ### 추가
@@ -111,7 +124,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/leestana01/K-Apply/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/leestana01/K-Apply/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/leestana01/K-Apply/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/leestana01/K-Apply/compare/v1.2.0...v1.3.0
