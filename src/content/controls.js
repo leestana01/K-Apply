@@ -666,11 +666,17 @@
    * 같은 이름이 없으면 "'검색어' 등록하기" 항목으로 직접 등록한다(허용한 경우에만).
    * 선택하면 입력칸이 선택한 이름을 보여 주는 텍스트로 바뀌므로, scope 안에 그 이름이 보이는지로 확인한다.
    * @param {HTMLInputElement} input
-   * @param {string} value
-   * @param {{scope: HTMLElement, register: false|'review'|'ok'}} options
+   * @param {string} value 검색어
+   * @param {object} options
+   * @param {HTMLElement} options.scope 선택 결과가 표시되는 영역
+   * @param {false|'review'|'ok'} [options.register] 같은 이름이 없을 때 직접 등록 여부
+   * @param {string[]} [options.names] 정확히 일치로 인정할 이름 후보(우선순위 순). 기본은 검색어 자체
+   * @param {boolean} [options.alias] 괄호 속 부가 명칭을 뺀 이름이나 괄호 속 명칭이 같은 항목이 하나뿐이면 선택
+   *   (예: 'SQLD' → 'SQLD(SQL개발자)'). 캠퍼스가 괄호로 붙는 학교명에는 쓰지 않는다.
    */
-  async function fillSearchList(input, value, { scope, register = false }) {
+  async function fillSearchList(input, value, { scope, register = false, names = null, alias = false }) {
     const wanted = text.normalize(value);
+    const accepted = (names && names.length ? names : [value]).map(text.normalize);
     input.focus({ preventScroll: true });
     dom.fire(input, 'focusin');
     insertText(input, value);
@@ -698,21 +704,38 @@
       return { ok: false, reason: '검색 결과를 불러오지 못했습니다.' };
     }
     const items = [...list.querySelectorAll('li > button')];
-    const exact = items.find((item) => text.normalize(dom.textOf(item)) === wanted);
+    const nameOf = (item) => text.normalize(dom.textOf(item));
+    let exact = null;
+    for (const name of accepted) {
+      exact = items.find((item) => nameOf(item) === name);
+      if (exact) break;
+    }
+    let aliased = null;
+    if (!exact && alias) {
+      const matches = items.filter((item) => {
+        const label = dom.textOf(item);
+        const inner = label.match(/\(([^)]*)\)\s*$/);
+        return accepted.includes(text.normalize(label.replace(/\s*\([^)]*\)\s*$/, ''))) || (inner && accepted.includes(text.normalize(inner[1])));
+      });
+      if (matches.length === 1) aliased = matches[0];
+    }
     const direct = items.find((item) => /등록하기/.test(dom.textOf(item)));
-    let chosen = exact;
+    let chosen = exact || aliased;
     if (!chosen && direct && register) chosen = direct;
     if (!chosen) {
       const names = items.map(dom.textOf).filter((name) => !/등록하기/.test(name));
       await close();
       return missingOption(names, [value]);
     }
+    const chosenName = chosen === direct ? wanted : nameOf(chosen);
+    const chosenLabel = dom.textOf(chosen);
     chosen.click();
     const shown = await dom.waitFor(
-      () => !searchResults(input) && (!input.isConnected || text.normalize(input.value) === wanted) && text.normalize(dom.textOf(scope)).includes(wanted),
+      () => !searchResults(input) && (!input.isConnected || text.normalize(input.value) === chosenName) && text.normalize(dom.textOf(scope)).includes(chosenName),
       { timeout: 2000 }
     );
     if (!shown) return { ok: false, reason: '항목을 골랐지만 화면에 반영되지 않았습니다.' };
+    if (chosen === aliased) return { ok: true, review: `목록의 '${chosenLabel}' 항목을 골랐습니다.` };
     if (chosen === direct) {
       return register === 'review' ? { ok: true, review: '목록에 같은 이름이 없어 직접 등록했습니다. 공식 명칭인지 확인해 주세요.' } : { ok: true, detail: '직접 등록' };
     }
