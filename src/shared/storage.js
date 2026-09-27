@@ -30,6 +30,8 @@
     overwrite: false,
     /** 목록 항목을 지원서에 넣는 순서: recent(최신순) | oldest(오래된순). 어떤 항목을 넣을지는 우선순위로 정한다. */
     entryOrder: 'recent',
+    /** 정렬 기준 날짜: start(시작일) | end(종료일). 날짜가 하나인 항목(수상·자격증·어학)은 그 날짜를 쓴다. */
+    entrySortKey: 'start',
   });
 
   function area() {
@@ -54,6 +56,7 @@
       showLauncher: typeof stored.showLauncher === 'boolean' ? stored.showLauncher : DEFAULT_SETTINGS.showLauncher,
       overwrite: typeof stored.overwrite === 'boolean' ? stored.overwrite : DEFAULT_SETTINGS.overwrite,
       entryOrder: stored.entryOrder === 'oldest' || stored.entryOrder === 'recent' ? stored.entryOrder : DEFAULT_SETTINGS.entryOrder,
+      entrySortKey: stored.entrySortKey === 'end' || stored.entrySortKey === 'start' ? stored.entrySortKey : DEFAULT_SETTINGS.entrySortKey,
     };
   }
 
