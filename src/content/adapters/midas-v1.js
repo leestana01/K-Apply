@@ -754,14 +754,52 @@
     return node;
   }
 
-  /** 선택된 시험·자격증 이름(칩)들. 괄호 속 부가 명칭을 뺀 이름도 함께 돌려준다(정규화하면 괄호가 사라지므로 먼저 뺀다). */
-  function chosenNames(prefix) {
-    return [...document.querySelectorAll(`input[name^="${prefix}"][name$=".organization"], input[name^="${prefix}"][name$=".registNumber"]`)].flatMap((input) => {
-      let node = input.parentElement;
+  /**
+   * 이미 선택된 시험·자격증 행들. 행마다 표시 이름(칩)과 기준 입력칸(anchor)을 돌려준다.
+   * 괄호 속 부가 명칭을 뺀 이름도 names에 넣는다(정규화하면 괄호가 사라지므로 먼저 뺀다).
+   */
+  function chosenRows(prefix, anchorKey) {
+    return [...document.querySelectorAll(`input[name^="${prefix}"][name$=".${anchorKey}"]`)].map((anchor) => {
+      let node = anchor.parentElement;
       while (node && !node.querySelector('p')) node = node.parentElement;
       const label = node ? dom.textOf(node.querySelector('p')) : '';
-      return label ? [text.normalize(label), text.normalize(label.replace(/\s*\([^)]*\)\s*$/, ''))] : [];
+      return { anchor, label, names: label ? [text.normalize(label), text.normalize(label.replace(/\s*\([^)]*\)\s*$/, ''))] : [] };
     });
+  }
+
+  /**
+   * 검색형 반복 행에서 항목을 고른다. 선택하면 검색 칸이 든 영역이 새 요소로 바뀌므로,
+   * 선택 결과는 [추가하기]까지 포함하는 고정된 상위 영역에서 확인한다.
+   * @returns {Promise<{status:string, anchor:HTMLInputElement|null, extra:object}>}
+   */
+  async function chooseInRow(session, { pattern, search, section, label, value, anchors, options, guard = false }) {
+    const input = await emptySearchRow(pattern, search);
+    if (!input) {
+      session.manual(section, label, '행을 추가하지 못했습니다(최대 개수를 넘었거나 추가 버튼이 없음). 직접 입력해 주세요.');
+      return { status: STATUS.FAILED, anchor: null, extra: {} };
+    }
+    const adder = rowAdder(pattern);
+    let scope = input.parentElement;
+    while (adder && scope && !scope.contains(adder)) scope = scope.parentElement;
+    const before = anchors();
+    const extra = {};
+    const status = await session.apply({
+      section,
+      label,
+      value,
+      run: async () => {
+        const select = () => controls.fillSearchList(input, value, { scope: scope || document.body, ...options });
+        if (!guard) return select();
+        // YBM 연동 기업은 TOEIC 등을 고르는 순간 YBM 로그인 창을 연다. 창을 막고, 막았다면 인증이 필요한 시험으로 본다.
+        const guarded = await KApply.engine.withPopupGuard(select);
+        if (!guarded) return { ok: false, reason: '인증 창 차단 모듈을 불러오지 못해 항목을 고르지 않았습니다. 직접 선택해 주세요.' };
+        extra.blocked = guarded.blocked;
+        return guarded.value;
+      },
+    });
+    if (status === STATUS.FAILED) return { status, anchor: null, extra };
+    const anchor = await dom.waitFor(() => anchors().find((element) => !before.includes(element)) || null);
+    return { status, anchor, extra };
   }
 
   function examNames(entry) {
@@ -770,99 +808,95 @@
     return [language && `${test}(${language})`, language && `${test} (${language})`, test].filter(Boolean);
   }
 
+  const EXAM_PREFIX = 'languageGroupAnswer.languageExamAnswers.';
+  const LICENSE_PREFIX = 'licenseGroupAnswer.licenseAnswers.';
+
+  async function fillExamFields(session, section, register, entry) {
+    const index = register.name.slice(EXAM_PREFIX.length).split('.')[0];
+    const field = (key) => document.querySelector(`input[name="${EXAM_PREFIX}${index}.${key}"]`);
+    const box = rowOfSearch(register, 'input[placeholder="응시일"]');
+    await applyText(session, { section, label: '등록 번호', input: register, value: entry.number });
+    await applyDate(session, { section, label: '응시일', input: box && box.querySelector('input[placeholder="응시일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+    const score = field('examScore.score');
+    if (score) {
+      await applyText(session, { section, label: '점수', input: score, value: entry.score });
+      return;
+    }
+    // 등급형 시험(OPIc 등): 같은 행의 등급 드롭다운
+    let row = box;
+    const picker = (node) => visibleControls('button', node).find((button) => button.type === 'button' && !isSegment(button) && !/추가하기/.test(dom.textOf(button)));
+    while (row && row !== document.body && !picker(row)) row = row.parentElement;
+    const trigger = row && row !== document.body ? picker(row) : null;
+    await session.apply({
+      section,
+      label: '등급',
+      value: text.candidatesFor('languageGrade', entry.grade),
+      filled: !!trigger && !/^등급$/.test(dom.textOf(trigger)),
+      run: () => (trigger ? controls.fillButtonDropdown(trigger, text.candidatesFor('languageGrade', entry.grade)) : { ok: false, reason: '등급 선택 칸을 찾지 못했습니다.' }),
+    });
+  }
+
   async function fillLanguages(session) {
     if (!rowAdder(/^공인\s*외국어/) && !visibleControls(EXAM_SEARCH).length) return;
+    const registers = () => [...document.querySelectorAll(`input[name^="${EXAM_PREFIX}"][name$=".registNumber"]`)];
     for (const entry of session.list('languages')) {
       if (text.isBlank(entry.test)) continue;
       const names = examNames(entry);
       const section = `어학 · ${names[0]}`;
-      if (chosenNames('languageGroupAnswer.').some((name) => names.map(text.normalize).includes(name))) {
-        session.report.add(STATUS.SKIPPED, '어학', names[0], '이미 입력됨');
-        continue;
+      const wanted = names.map(text.normalize);
+      const existing = chosenRows(EXAM_PREFIX, 'registNumber').find((row) => row.names.some((name) => wanted.includes(name)));
+      let register = existing && existing.anchor;
+      let blocked = 0;
+      if (!register) {
+        const chosen = await chooseInRow(session, {
+          pattern: /^공인\s*외국어/,
+          search: EXAM_SEARCH,
+          section,
+          label: '시험명',
+          value: String(entry.test).trim(),
+          anchors: registers,
+          options: { names },
+          guard: true,
+        });
+        if (chosen.status === STATUS.FAILED || !chosen.anchor) continue;
+        register = chosen.anchor;
+        blocked = chosen.extra.blocked;
       }
-      const input = await emptySearchRow(/^공인\s*외국어/, EXAM_SEARCH);
-      if (!input) {
-        session.manual('어학', names[0], '시험 행을 추가하지 못했습니다(최대 개수를 넘었거나 추가 버튼이 없음).');
-        continue;
-      }
-      const row = input.parentElement;
-      const registers = () => [...document.querySelectorAll('input[name^="languageGroupAnswer.languageExamAnswers."][name$=".registNumber"]')];
-      const before = registers();
-      let ybm = false;
-      const status = await session.apply({
-        section,
-        label: '시험명',
-        value: names[0],
-        run: async () => {
-          // YBM 연동 기업은 TOEIC 등을 고르는 순간 YBM 로그인 창을 연다. 창을 막고, 막았다면 인증이 필요한 시험으로 본다.
-          const guarded = await KApply.engine.withPopupGuard(() =>
-            controls.fillSearchList(input, String(entry.test).trim(), { scope: row.parentElement || row, names, alias: false })
-          );
-          if (!guarded) return { ok: false, reason: '인증 창 차단 모듈을 불러오지 못해 시험을 고르지 않았습니다. 직접 선택해 주세요.' };
-          if (guarded.blocked !== 0) ybm = true;
-          return guarded.value;
-        },
-      });
-      if (status === STATUS.FAILED) continue;
-
-      // 선택하면 그 행의 입력칸이 새로 생긴다.
-      const register = await dom.waitFor(() => registers().find((element) => !before.includes(element)) || null);
-      const box = register && rowOfSearch(register, 'input[placeholder="응시일"]');
-      if (!box) continue;
-      if (ybm || register.disabled) {
+      if (blocked !== 0 || register.disabled) {
         session.manual(section, '성적 인증', 'YBM 성적 인증을 거쳐야 점수가 입력되는 시험입니다. 시험을 지운 뒤 다시 선택해 인증 창에서 인증해 주세요.');
         continue;
       }
-      const index = register.name.match(/languageExamAnswers\.(\d+)\./)[1];
-      const field = (key) => document.querySelector(`input[name="languageGroupAnswer.languageExamAnswers.${index}.${key}"]`);
-      await applyText(session, { section, label: '등록 번호', input: register, value: entry.number });
-      await applyDate(session, { section, label: '응시일', input: box.querySelector('input[placeholder="응시일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
-      const score = field('examScore.score');
-      if (score) {
-        await applyText(session, { section, label: '점수', input: score, value: entry.score });
-      } else {
-        let grade = box;
-        while (grade && grade !== document.body && !visibleControls('button', grade).some((button) => !isSegment(button) && button.type === 'button')) grade = grade.parentElement;
-        const trigger = grade && visibleControls('button', grade).find((button) => button.type === 'button' && !isSegment(button) && !/추가하기/.test(dom.textOf(button)));
-        await applyDropdown(session, { section, label: '등급', trigger, candidates: text.candidatesFor('languageGrade', entry.grade) });
-      }
+      await fillExamFields(session, section, register, entry);
     }
   }
 
   async function fillLicenses(session) {
     if (!rowAdder(/^자격증/) && !visibleControls(LICENSE_SEARCH).length) return;
+    // 목록에 없는 자격증(직접 등록)은 자격 번호 칸이 없으므로 발행 기관 칸을 기준으로 삼는다.
+    const organizations = () => [...document.querySelectorAll(`input[name^="${LICENSE_PREFIX}"][name$=".organization"]`)];
     for (const entry of session.list('certificates')) {
       if (text.isBlank(entry.name)) continue;
       const section = `자격증 · ${entry.name}`;
-      const already = chosenNames('licenseGroupAnswer.').includes(text.normalize(entry.name));
-      if (already) {
-        session.report.add(STATUS.SKIPPED, '자격증', entry.name, '이미 입력됨');
-        continue;
+      const existing = chosenRows(LICENSE_PREFIX, 'organization').find((row) => row.names.includes(text.normalize(entry.name)));
+      let organization = existing && existing.anchor;
+      if (!organization) {
+        const chosen = await chooseInRow(session, {
+          pattern: /^자격증/,
+          search: LICENSE_SEARCH,
+          section,
+          label: '자격증명',
+          value: entry.name,
+          anchors: organizations,
+          options: { register: 'review', alias: true },
+        });
+        if (chosen.status === STATUS.FAILED || !chosen.anchor) continue;
+        organization = chosen.anchor;
       }
-      const input = await emptySearchRow(/^자격증/, LICENSE_SEARCH);
-      if (!input) {
-        session.manual('자격증', entry.name, '자격증 행을 추가하지 못했습니다(최대 개수를 넘었거나 추가 버튼이 없음).');
-        continue;
-      }
-      const row = input.parentElement;
-      const organizations = () => [...document.querySelectorAll('input[name^="licenseGroupAnswer.licenseAnswers."][name$=".organization"]')];
-      const before = organizations();
-      const status = await session.apply({
-        section,
-        label: '자격증명',
-        value: entry.name,
-        run: () => controls.fillSearchList(input, entry.name, { scope: row.parentElement || row, register: 'review', alias: true }),
-      });
-      if (status === STATUS.FAILED) continue;
-      // 목록에 없는 자격증(직접 등록)은 자격 번호 칸이 없으므로 발행 기관 칸으로 행을 찾는다.
-      // 선택하면 그 행의 입력칸이 새로 생긴다.
-      const organization = await dom.waitFor(() => organizations().find((element) => !before.includes(element)) || null);
-      if (!organization) continue;
-      const index = organization.name.match(/licenseAnswers\.(\d+)\./)[1];
+      const index = organization.name.slice(LICENSE_PREFIX.length).split('.')[0];
       const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
       await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
       await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
-      await applyText(session, { section, label: '자격 번호', input: document.querySelector(`input[name="licenseGroupAnswer.licenseAnswers.${index}.registNumber"]`), value: entry.number });
+      await applyText(session, { section, label: '자격 번호', input: document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`), value: entry.number });
     }
   }
 
