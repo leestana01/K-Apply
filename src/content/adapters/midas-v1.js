@@ -1068,6 +1068,48 @@
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // 비어 있는 필수 칸 점검
+  // ---------------------------------------------------------------------------
+
+  /** 필수 표시: 입력칸을 감싼 요소의 ::before에 '*'를 그린다. */
+  function markedRequired(element) {
+    let node = element.parentElement;
+    for (let depth = 0; depth < 3 && node; depth += 1) {
+      const content = getComputedStyle(node, '::before').content;
+      if (content && /\*/.test(content)) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  /** 칸 이름: 행 제목과 안내 문구(placeholder)를 합친다. */
+  function fieldName(element) {
+    const title = rowLabel(element);
+    const hint = (element.getAttribute('placeholder') || '').replace(/(을|를)?\s*(입력|검색|선택)해\s*주세요\.?$/, '').trim();
+    return [title, hint].filter(Boolean).join(' · ') || element.name || '입력 칸';
+  }
+
+  /**
+   * 입력을 마친 뒤 화면에 비어 있는 필수 칸을 모두 알린다. 프로필에 값이 없거나 K-Apply가 다루지 않는 칸이라
+   * 비어 있는 경우에도, 다음 단계 이동·제출 전에 무엇을 채워야 하는지 알 수 있게 한다.
+   */
+  function reportEmptyRequired(session) {
+    const empty = visibleControls('input[type="text"], input[type="number"], textarea').filter(
+      (element) => !element.disabled && !element.readOnly && !controls.hasValue(element) && markedRequired(element)
+    );
+    const pickers = visibleControls('button').filter(
+      (button) => button.type === 'button' && !button.disabled && /선택해\s*주세요|^선택$/.test(dom.textOf(button)) && markedRequired(button)
+    );
+    const names = [...new Set([...empty, ...pickers].map(fieldName))];
+    if (!names.length) return;
+    session.manual(
+      '필수 항목',
+      `비어 있는 필수 칸 ${names.length}개`,
+      `${names.slice(0, 6).join(', ')}${names.length > 6 ? ` 외 ${names.length - 6}개` : ''}. 프로필에 값이 없거나 K-Apply가 채우지 않는 칸입니다. 다음 단계로 넘어가기 전에 직접 입력해 주세요.`
+    );
+  }
+
   const hasStep3Sections = () => !!(rowAdder(/^공인\s*외국어/) || rowAdder(/^자격증/) || adderOf('award') || adderOf('activity') || blocksOf('award').length || blocksOf('activity').length);
 
   async function fill(session) {
@@ -1099,6 +1141,7 @@
       session.report.notice('이 단계는 자동 입력할 항목이 없습니다. 자기소개서 등 서술형 문항은 직접 작성해 주세요.');
     }
     await noticeAttachments(session);
+    reportEmptyRequired(session);
     session.report.notice('단계를 이동하면 저장됩니다. 입력 결과를 확인한 뒤 [임시저장] 또는 [다음]을 직접 눌러 주세요.');
   }
 
