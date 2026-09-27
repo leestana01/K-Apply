@@ -228,19 +228,29 @@
       rerender(section.id, true);
     });
     card.append(el('div', { className: 'section-head' }, [el('h2', { textContent: section.title }), addButton]));
+    if (section.ranked) {
+      card.append(
+        el('p', {
+          className: 'rank-hint',
+          textContent: `지원서가 받는 ${section.itemLabel} 개수가 정해져 있으면(대표 1건, 최대 3건 등) 1순위부터 입력합니다. 순서를 바꿔 대표 항목을 정하세요.`,
+        })
+      );
+    }
 
     const list = el('div', { className: 'entries' });
     if (!entries.length) {
       list.append(el('div', { className: 'empty', textContent: `등록된 ${section.itemLabel}이(가) 없습니다.` }));
     }
+    const moveTo = (from, to) => {
+      if (from === to || to < 0 || to >= entries.length) return;
+      const [moved] = entries.splice(from, 1);
+      entries.splice(to, 0, moved);
+      scheduleSave();
+      rerender(section.id);
+    };
     entries.forEach((entry, index) => {
       const title = el('div', { className: 'entry-title', textContent: entryTitle(section, entry, index) });
-      const move = (delta) => {
-        const target = index + delta;
-        [entries[index], entries[target]] = [entries[target], entries[index]];
-        scheduleSave();
-        rerender(section.id);
-      };
+      const move = (delta) => moveTo(index, index + delta);
       const up = el('button', { className: 'icon-btn', type: 'button', title: '위로', 'aria-label': '위로 이동', textContent: '↑', disabled: index === 0 });
       const down = el('button', {
         className: 'icon-btn',
@@ -251,6 +261,20 @@
         disabled: index === entries.length - 1,
       });
       const remove = el('button', { className: 'icon-btn', type: 'button', title: '삭제', 'aria-label': '삭제', textContent: '✕' });
+      const head = [title];
+      if (section.ranked) {
+        const rank = el('span', { className: `rank${index === 0 ? ' rank-first' : ''}`, textContent: `${index + 1}순위` });
+        const top = el('button', {
+          className: 'btn btn-small',
+          type: 'button',
+          textContent: '대표로 지정',
+          title: '1순위로 올립니다',
+          disabled: index === 0,
+        });
+        top.addEventListener('click', () => moveTo(index, 0));
+        head.unshift(rank);
+        head.push(top);
+      }
       up.addEventListener('click', () => move(-1));
       down.addEventListener('click', () => move(1));
       remove.addEventListener('click', () => {
@@ -270,10 +294,47 @@
           })
         )
       );
-      list.append(el('article', { className: 'entry' }, [el('div', { className: 'entry-head' }, [title, up, down, remove]), grid]));
+      const article = el('article', { className: 'entry' }, [el('div', { className: 'entry-head' }, [...head, up, down, remove]), grid]);
+      if (section.ranked) enableDrag(article, list, index, moveTo);
+      list.append(article);
     });
     card.append(list);
     return card;
+  }
+
+  /**
+   * 항목 머리글을 끌어 순위를 바꾼다. 입력칸 안에서 텍스트를 끌 때는 동작하지 않도록 머리글에서만 시작한다.
+   * 키보드 사용자는 ↑·↓·[대표로 지정] 버튼으로 같은 일을 할 수 있다.
+   */
+  function enableDrag(article, list, index, moveTo) {
+    const head = article.querySelector('.entry-head');
+    head.classList.add('draggable');
+    head.setAttribute('title', '끌어서 순위를 바꿀 수 있습니다');
+    head.addEventListener('pointerdown', (event) => {
+      article.draggable = !event.target.closest('button');
+    });
+    article.addEventListener('dragstart', (event) => {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/x-kapply-index', String(index));
+      article.classList.add('dragging');
+    });
+    article.addEventListener('dragend', () => {
+      article.draggable = false;
+      article.classList.remove('dragging');
+      list.querySelectorAll('.drop-target').forEach((node) => node.classList.remove('drop-target'));
+    });
+    article.addEventListener('dragover', (event) => {
+      if (!event.dataTransfer.types.includes('text/x-kapply-index')) return;
+      event.preventDefault();
+      article.classList.add('drop-target');
+    });
+    article.addEventListener('dragleave', () => article.classList.remove('drop-target'));
+    article.addEventListener('drop', (event) => {
+      const from = Number(event.dataTransfer.getData('text/x-kapply-index'));
+      if (!Number.isInteger(from)) return;
+      event.preventDefault();
+      moveTo(from, index);
+    });
   }
 
   function renderSection(section) {

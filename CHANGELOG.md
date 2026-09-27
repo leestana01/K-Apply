@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-27
+
+### 추가
+
+- 목록 항목 **우선순위**: 옵션 화면의 경력·프로젝트·활동·교육·어학·자격증·수상 항목에 순위 표시(1순위…), [대표로 지정] 버튼, 끌어서 순서 바꾸기. 지원서가 받는 개수가 정해져 있으면 1순위부터 입력
+- 개수 초과 안내에 [대표로 지정] 방법을 함께 표시
+
 ## [1.6.0] - 2026-09-27
 
 ### 추가
@@ -124,7 +131,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/leestana01/K-Apply/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/leestana01/K-Apply/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/leestana01/K-Apply/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/leestana01/K-Apply/compare/v1.3.0...v1.4.0
