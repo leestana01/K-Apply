@@ -680,19 +680,27 @@
     input.focus({ preventScroll: true });
     dom.fire(input, 'focusin');
     insertText(input, value);
+    // 사이트는 검색 결과보다 "'검색어'등록하기" 항목을 먼저 보여 준다. 등록 항목만 있는 목록은
+    // 결과가 늦게 도착할 수 있으므로 더 오래 변화가 없을 때만 확정한다.
     let signature = '';
+    let since = Date.now();
     const list = await dom.waitFor(
       () => {
         const found = searchResults(input);
         if (!found) return null;
         const items = [...found.querySelectorAll('li > button')].map(dom.textOf);
-        const related = items.some((item) => text.normalize(item).includes(wanted) || /등록하기/.test(item));
+        const results = items.filter((item) => !/등록하기/.test(item));
+        const related = results.some((item) => text.normalize(item).includes(wanted)) || items.length > results.length;
         const current = items.join('|');
-        const stable = related && current === signature;
-        signature = current;
-        return stable ? found : null;
+        if (current !== signature) {
+          signature = current;
+          since = Date.now();
+          return null;
+        }
+        const settle = results.length ? 250 : 1500;
+        return related && Date.now() - since >= settle ? found : null;
       },
-      { timeout: 6000, interval: 250 }
+      { timeout: 8000, interval: 250 }
     );
     const close = async () => {
       insertText(input, '');

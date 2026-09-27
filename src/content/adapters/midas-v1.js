@@ -754,12 +754,13 @@
     return node;
   }
 
-  /** 선택된 시험·자격증 이름(칩) 목록 */
+  /** 선택된 시험·자격증 이름(칩)들. 괄호 속 부가 명칭을 뺀 이름도 함께 돌려준다(정규화하면 괄호가 사라지므로 먼저 뺀다). */
   function chosenNames(prefix) {
-    return [...document.querySelectorAll(`input[name^="${prefix}"][name$=".registNumber"]`)].map((input) => {
+    return [...document.querySelectorAll(`input[name^="${prefix}"][name$=".organization"], input[name^="${prefix}"][name$=".registNumber"]`)].flatMap((input) => {
       let node = input.parentElement;
       while (node && !node.querySelector('p')) node = node.parentElement;
-      return node ? text.normalize(dom.textOf(node.querySelector('p'))) : '';
+      const label = node ? dom.textOf(node.querySelector('p')) : '';
+      return label ? [text.normalize(label), text.normalize(label.replace(/\s*\([^)]*\)\s*$/, ''))] : [];
     });
   }
 
@@ -785,6 +786,8 @@
         continue;
       }
       const row = input.parentElement;
+      const registers = () => [...document.querySelectorAll('input[name^="languageGroupAnswer.languageExamAnswers."][name$=".registNumber"]')];
+      const before = registers();
       let ybm = false;
       const status = await session.apply({
         section,
@@ -802,10 +805,8 @@
       });
       if (status === STATUS.FAILED) continue;
 
-      const register = await dom.waitFor(() => {
-        const inputs = [...document.querySelectorAll('input[name^="languageGroupAnswer.languageExamAnswers."][name$=".registNumber"]')];
-        return inputs.find((element) => !controls.hasValue(element) && rowOfSearch(element, 'input[placeholder="응시일"]')) || inputs[inputs.length - 1] || null;
-      });
+      // 선택하면 그 행의 입력칸이 새로 생긴다.
+      const register = await dom.waitFor(() => registers().find((element) => !before.includes(element)) || null);
       const box = register && rowOfSearch(register, 'input[placeholder="응시일"]');
       if (!box) continue;
       if (ybm || register.disabled) {
@@ -833,7 +834,7 @@
     for (const entry of session.list('certificates')) {
       if (text.isBlank(entry.name)) continue;
       const section = `자격증 · ${entry.name}`;
-      const already = chosenNames('licenseGroupAnswer.').some((name) => name === text.normalize(entry.name) || name.replace(/\([^)]*\)$/, '') === text.normalize(entry.name));
+      const already = chosenNames('licenseGroupAnswer.').includes(text.normalize(entry.name));
       if (already) {
         session.report.add(STATUS.SKIPPED, '자격증', entry.name, '이미 입력됨');
         continue;
@@ -844,6 +845,8 @@
         continue;
       }
       const row = input.parentElement;
+      const organizations = () => [...document.querySelectorAll('input[name^="licenseGroupAnswer.licenseAnswers."][name$=".organization"]')];
+      const before = organizations();
       const status = await session.apply({
         section,
         label: '자격증명',
@@ -851,16 +854,15 @@
         run: () => controls.fillSearchList(input, entry.name, { scope: row.parentElement || row, register: 'review', alias: true }),
       });
       if (status === STATUS.FAILED) continue;
-      const register = await dom.waitFor(() => {
-        const inputs = [...document.querySelectorAll('input[name^="licenseGroupAnswer.licenseAnswers."][name$=".registNumber"]')];
-        return inputs.find((element) => !controls.hasValue(element)) || null;
-      });
-      if (!register) continue;
-      const index = register.name.match(/licenseAnswers\.(\d+)\./)[1];
-      const box = rowOfSearch(register, 'input[placeholder="취득일"]');
-      await applyText(session, { section, label: '발행 기관', input: document.querySelector(`input[name="licenseGroupAnswer.licenseAnswers.${index}.organization"]`), value: entry.issuer });
+      // 목록에 없는 자격증(직접 등록)은 자격 번호 칸이 없으므로 발행 기관 칸으로 행을 찾는다.
+      // 선택하면 그 행의 입력칸이 새로 생긴다.
+      const organization = await dom.waitFor(() => organizations().find((element) => !before.includes(element)) || null);
+      if (!organization) continue;
+      const index = organization.name.match(/licenseAnswers\.(\d+)\./)[1];
+      const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
+      await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
       await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
-      await applyText(session, { section, label: '자격 번호', input: register, value: entry.number });
+      await applyText(session, { section, label: '자격 번호', input: document.querySelector(`input[name="licenseGroupAnswer.licenseAnswers.${index}.registNumber"]`), value: entry.number });
     }
   }
 
