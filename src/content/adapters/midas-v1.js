@@ -296,9 +296,6 @@
         },
       });
     }
-
-    const period = visibleControls('button').filter((button) => /^\d+\s*개월$/.test(dom.textOf(button)));
-    if (period.length) session.manual(SECTION.military, '복무 기간', '복무 기간(개월)은 병역 종류마다 기준이 달라 직접 선택해 주세요.');
   }
 
   async function fillPreferential(session) {
