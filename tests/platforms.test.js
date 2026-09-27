@@ -58,3 +58,9 @@ test('마이다스인 새 지원서 화면(/v1/applicant)을 입력 양식으로
   assert.equal(result.formReady, true);
   assert.equal(platforms.detect(fakeDocument(), { hostname: 'iprovest.recruiter.co.kr' }).formReady, false);
 });
+
+test('마이다스인 새 화면의 학력·경력 단계는 입력칸이 없어도 경로로 입력 양식을 인식한다', () => {
+  const result = platforms.detect(fakeDocument(), { hostname: 'iprovest.recruiter.co.kr', pathname: '/v1/applicant/resume-form/266891' });
+  assert.equal(result.formReady, true);
+  assert.equal(platforms.detect(fakeDocument(), { hostname: 'iprovest.recruiter.co.kr', pathname: '/v1/applicant/notice/266891' }).formReady, false);
+});
