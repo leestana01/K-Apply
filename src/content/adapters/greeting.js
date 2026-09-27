@@ -443,16 +443,18 @@
   async function fillList(session, list) {
     const entries = session.list(list.source).filter(list.filter || (() => true));
     if (!entries.length || !entryExists(list, 0)) return;
-    // 받는 개수는 공고마다 다르다. 단일 항목(고등학교 등)이면 첫 항목만, 목록이면 [항목 추가]가 되는 만큼 넣는다.
-    const limit = list.single ? 1 : entries.length;
-    if (list.single) session.overflow(list.title, list.source, entries.slice(1), 1);
-    for (let index = 0; index < limit; index += 1) {
-      const entry = entries[index];
+    // 받는 개수는 공고마다 다르다. 단일 항목(고등학교 등)이면 1건, 목록이면 [항목 추가]가 되는 만큼 칸을 먼저 확보한다.
+    let capacity = 0;
+    if (list.single) capacity = 1;
+    else {
+      while (capacity < entries.length && (await ensureEntry(list, capacity))) capacity += 1;
+    }
+    // 우선순위(목록 순서)로 넣을 항목을 고르고, 고른 항목은 날짜순으로 넣는다.
+    session.overflow(list.title, list.source, entries.slice(capacity), capacity);
+    const chosen = session.chronological(list.source, entries.slice(0, capacity));
+    for (let index = 0; index < chosen.length; index += 1) {
+      const entry = chosen[index];
       const label = `${list.title} ${list.single ? '' : index + 1}`.trim();
-      if (!(await ensureEntry(list, index))) {
-        session.overflow(list.title, list.source, entries.slice(index), index);
-        break;
-      }
       const prefix = entryPrefix(list, index);
       const keyElement = document.querySelector(`[name="${CSS.escape(prefix + list.key)}"]`);
       if (keyElement && isFilled(keyElement, kindOf(keyElement)) && !session.settings.overwrite) {

@@ -333,46 +333,44 @@
 
   /** @returns {Promise<boolean>} 모든 항목을 저장했거나 건너뛰었으면 true, 저장 실패로 중단했으면 false */
   async function fillSubformList(session, block, sectionTitle, entries, planFor, sourceId) {
-    // 받는 개수는 공고마다 다르다. 항목 안내 문구("최대 3개" 등)가 있으면 그 수까지만 넣는다.
+    const present = (entry) => {
+      const key = planFor(entry).key;
+      return !!key && (block.textContent || '').includes(key);
+    };
+    const saved = entries.filter(present);
+    saved.forEach((entry) => session.report.add(STATUS.SKIPPED, sectionTitle, planFor(entry).key, '이미 입력됨'));
+    const pending = entries.filter((entry) => planFor(entry).key && !present(entry));
+
+    // 받는 개수는 공고마다 다르다. 항목 안내 문구("최대 3개" 등)가 있으면 이미 저장된 것을 포함해 그 수까지만 넣는다.
+    // 우선순위(목록 순서)로 넣을 항목을 고르고, 고른 항목은 날짜순으로 저장한다.
     const limit = dom.countLimitOf(block);
-    let taken = 0;
-    for (let index = 0; index < entries.length; index += 1) {
-      const plan = planFor(entries[index]);
-      const label = `${sectionTitle} ${index + 1}${plan.key ? ` (${plan.key})` : ''}`;
-      if (!plan.key) continue;
-      if ((block.textContent || '').includes(plan.key)) {
-        taken += 1;
-        session.report.add(STATUS.SKIPPED, sectionTitle, label, '이미 입력됨');
-        continue;
-      }
-      if (limit && taken >= limit) {
-        const rest = entries.slice(index).filter((entry) => {
-          const key = planFor(entry).key;
-          return key && !(block.textContent || '').includes(key);
-        });
-        session.overflow(sectionTitle, sourceId, rest, limit);
-        return true;
-      }
+    const room = limit ? Math.max(0, limit - saved.length) : pending.length;
+    session.overflow(sectionTitle, sourceId, pending.slice(room), limit || undefined);
+    const chosen = session.chronological(sourceId, pending.slice(0, room));
+
+    for (let index = 0; index < chosen.length; index += 1) {
+      const plan = planFor(chosen[index]);
+      const label = `${sectionTitle} ${index + 1} (${plan.key})`;
       let outcome;
       try {
         outcome = await runSubform(block, plan);
       } catch (error) {
         outcome = { ok: false, reason: error.message };
       }
-      if (outcome.ok) taken += 1;
       const status = !outcome.ok ? STATUS.FAILED : outcome.review ? STATUS.REVIEW : STATUS.FILLED;
       session.report.add(status, sectionTitle, label, outcome.reason || outcome.review || '');
       // 저장에 실패하면 하위 폼에 값이 남아 있으므로 다음 항목을 이어서 넣지 않는다(값이 섞이는 것을 방지).
       if (!outcome.ok) {
-        const remaining = entries.length - index - 1;
+        const remaining = chosen.length - index - 1;
         if (remaining > 0) {
-          session.manual(sectionTitle, `${sectionTitle} ${index + 2}~${entries.length}`, `위 항목을 먼저 저장해야 해서 나머지 ${remaining}건은 입력하지 않았습니다. 해결 후 다시 실행해 주세요.`);
+          session.manual(sectionTitle, `나머지 ${remaining}건`, `위 항목을 먼저 저장해야 해서 나머지 ${remaining}건은 입력하지 않았습니다. 해결 후 다시 실행해 주세요.`);
         }
         return false;
       }
     }
     return true;
   }
+
 
   const PLANS = {
     educations(entry) {
