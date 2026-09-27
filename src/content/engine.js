@@ -44,6 +44,19 @@
     'military.disability': 'targetFlag',
   };
 
+  /**
+   * 실패·확인 안내가 무엇에 대한 것인지 알 수 있도록, 입력하려던 값이 문구에 없으면 덧붙인다.
+   * 선택형은 후보 목록의 첫 값(프로필 값)을 쓴다.
+   */
+  function withValue(message, value) {
+    const shown = Array.isArray(value) ? value[0] : value;
+    if (shown === undefined || shown === null || typeof shown === 'object') return message;
+    const textValue = String(shown).trim();
+    if (!textValue || String(message).includes(textValue)) return message;
+    const clipped = textValue.length > 40 ? `${textValue.slice(0, 40)}…` : textValue;
+    return `${message} (입력값: '${clipped}')`;
+  }
+
   /** 목록 항목의 표시 이름: 스키마의 요약 필드 중 첫 번째 값 */
   function entryTitle(sectionId, entry) {
     const section = (KApply.schema.SECTIONS || []).find((item) => item.id === sectionId);
@@ -173,17 +186,17 @@
       try {
         const outcome = toOutcome(await run());
         if (!outcome.ok) {
-          this.report.add(STATUS.FAILED, section, label, outcome.reason || DEFAULT_FAILURE);
+          this.report.add(STATUS.FAILED, section, label, withValue(outcome.reason || DEFAULT_FAILURE, value));
           return STATUS.FAILED;
         }
         if (outcome.review) {
-          this.report.add(STATUS.REVIEW, section, label, outcome.review);
+          this.report.add(STATUS.REVIEW, section, label, withValue(outcome.review, value));
           return STATUS.REVIEW;
         }
         this.report.add(STATUS.FILLED, section, label, outcome.detail || '');
         return STATUS.FILLED;
       } catch (error) {
-        this.report.add(STATUS.FAILED, section, label, error && error.message ? error.message : String(error));
+        this.report.add(STATUS.FAILED, section, label, withValue(error && error.message ? error.message : String(error), value));
         return STATUS.FAILED;
       }
     }

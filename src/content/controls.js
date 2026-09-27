@@ -557,7 +557,7 @@
   async function fillButtonDropdown(trigger, candidates) {
     if (!openListbox(trigger)) trigger.click();
     const list = await dom.waitFor(() => openListbox(trigger), { timeout: 2000 });
-    if (!list) return { ok: false, reason: '선택 목록이 열리지 않았습니다.' };
+    if (!list) return { ok: false, reason: `선택 목록이 열리지 않았습니다(선택하려던 값: '${(candidates || [])[0] || ''}').` };
     const items = [...list.querySelectorAll('li button[value]')].filter((item) => !/선택\s*안\s*함/.test(dom.textOf(item)));
     const index = text.pickOption(items.map(dom.textOf), candidates);
     if (index < 0) {
@@ -568,7 +568,7 @@
     const chosen = dom.textOf(items[index]);
     items[index].click();
     await dom.sleep(250);
-    return text.normalize(dom.textOf(trigger)) === text.normalize(chosen) ? true : { ok: false, reason: '선택한 항목이 반영되지 않았습니다.' };
+    return text.normalize(dom.textOf(trigger)) === text.normalize(chosen) ? true : { ok: false, reason: `'${chosen}'을(를) 골랐지만 반영되지 않았습니다.` };
   }
 
   /** 버튼형 선택(비대상|군필|…): 선택된 버튼은 흰 배경 인라인 스타일로 표시된다. */
@@ -695,81 +695,121 @@
    * @param {boolean} [options.alias] 괄호 속 부가 명칭을 뺀 이름이나 괄호 속 명칭이 같은 항목이 하나뿐이면 선택
    *   (예: 'SQLD' → 'SQLD(SQL개발자)'). 캠퍼스가 괄호로 붙는 학교명에는 쓰지 않는다.
    */
+  /** 괄호 속 부가 명칭 변형: 'SQLD(SQL개발자)' → ['sqldsql개발자', 'sqld', 'sql개발자'] (정규화, 2자 이상) */
+  function nameVariants(name) {
+    const label = String(name || '').trim();
+    const inner = label.match(/\(([^)]*)\)\s*$/);
+    const base = label.replace(/\s*\([^)]*\)\s*$/, '');
+    return [...new Set([label, base, inner ? inner[1] : ''].map(text.normalize).filter((item) => item.length >= 2))];
+  }
+
   async function fillSearchList(input, value, { scope, register = false, names = null, alias = false }) {
     const wanted = text.normalize(value);
     const accepted = (names && names.length ? names : [value]).map(text.normalize);
+    const wantedVariants = alias ? [...new Set(accepted.flatMap((name) => nameVariants(name)).concat(nameVariants(value)))] : [];
     input.focus({ preventScroll: true });
     dom.fire(input, 'focusin');
-    insertText(input, value);
-    // 사이트는 검색 결과보다 "'검색어'등록하기" 항목을 먼저 보여 준다. 등록 항목만 있는 목록은
-    // 결과가 늦게 도착할 수 있으므로 더 오래 변화가 없을 때만 확정한다.
-    let signature = '';
-    let since = Date.now();
-    const list = await dom.waitFor(
-      () => {
-        const found = searchResults(input);
-        if (!found) return null;
-        const items = [...found.querySelectorAll('li > button')].map(dom.textOf);
-        const results = items.filter((item) => !/등록하기/.test(item));
-        const related = results.some((item) => text.normalize(item).includes(wanted)) || items.length > results.length;
-        const current = items.join('|');
-        if (current !== signature) {
-          signature = current;
-          since = Date.now();
-          return null;
-        }
-        const settle = results.length ? 250 : 1500;
-        return related && Date.now() - since >= settle ? found : null;
-      },
-      { timeout: 8000, interval: 250 }
-    );
+
+    /**
+     * 검색어를 넣고 결과 목록이 안정될 때까지 기다린다.
+     * 사이트는 검색 결과보다 "'검색어'등록하기" 항목을 먼저 보여 준다. 등록 항목만 있는 목록은
+     * 결과가 늦게 도착할 수 있으므로 더 오래 변화가 없을 때만 확정한다.
+     */
+    async function search(query) {
+      insertText(input, query);
+      const key = text.normalize(query);
+      let signature = '';
+      let since = Date.now();
+      return dom.waitFor(
+        () => {
+          const found = searchResults(input);
+          if (!found) return null;
+          const items = [...found.querySelectorAll('li > button')].map(dom.textOf);
+          const results = items.filter((item) => !/등록하기/.test(item));
+          const related = results.some((item) => text.normalize(item).includes(key)) || items.length > results.length;
+          const current = items.join('|');
+          if (current !== signature) {
+            signature = current;
+            since = Date.now();
+            return null;
+          }
+          const settle = results.length ? 250 : 1500;
+          return related && Date.now() - since >= settle ? found : null;
+        },
+        { timeout: 8000, interval: 250 }
+      );
+    }
+
+    const nameOf = (item) => text.normalize(dom.textOf(item));
+    const pick = (items) => {
+      for (const name of accepted) {
+        const exact = items.find((item) => nameOf(item) === name);
+        if (exact) return { item: exact, aliased: false };
+      }
+      if (!alias) return null;
+      // 괄호 안팎이 뒤바뀐 표기도 같은 항목으로 본다: 'SQL 개발자(SQLD)' ↔ 'SQLD(SQL개발자)'. 하나뿐일 때만 고른다.
+      const matches = items.filter((item) => !/등록하기/.test(dom.textOf(item)) && nameVariants(dom.textOf(item)).some((variant) => wantedVariants.includes(variant)));
+      return matches.length === 1 ? { item: matches[0], aliased: true } : null;
+    };
+
+    // 전체 이름으로 찾고, 없으면 괄호 밖·안 이름으로 다시 찾는다(사이트 검색은 부분 일치라 괄호가 붙은 이름으로는 안 나오는 경우가 있다).
+    const queries = [String(value)];
+    if (alias) {
+      const label = String(value).trim();
+      const inner = label.match(/\(([^)]*)\)\s*$/);
+      [label.replace(/\s*\([^)]*\)\s*$/, ''), inner ? inner[1] : ''].forEach((query) => {
+        if (query && query.trim().length >= 2 && !queries.includes(query.trim())) queries.push(query.trim());
+      });
+    }
+    let list = null;
+    let found = null;
+    let seen = [];
+    for (const query of queries) {
+      list = await search(query);
+      if (!list) continue;
+      const items = [...list.querySelectorAll('li > button')];
+      seen = [...new Set(seen.concat(items.map(dom.textOf).filter((name) => !/등록하기/.test(name))))];
+      found = pick(items);
+      if (found) break;
+    }
     const close = async () => {
       insertText(input, '');
       input.blur();
       await dom.sleep(150);
     };
-    if (!list) {
-      await close();
-      return { ok: false, reason: '검색 결과를 불러오지 못했습니다.' };
+
+    let chosen = found && found.item;
+    let direct = null;
+    if (!chosen && register) {
+      // 직접 등록은 입력한 검색어 그대로 등록되므로, 원래 이름으로 다시 검색한 목록에서 고른다.
+      list = queries.length > 1 || !list ? await search(String(value)) : list;
+      direct = list && [...list.querySelectorAll('li > button')].find((item) => /등록하기/.test(dom.textOf(item)));
+      chosen = direct;
     }
-    const items = [...list.querySelectorAll('li > button')];
-    const nameOf = (item) => text.normalize(dom.textOf(item));
-    let exact = null;
-    for (const name of accepted) {
-      exact = items.find((item) => nameOf(item) === name);
-      if (exact) break;
-    }
-    let aliased = null;
-    if (!exact && alias) {
-      const matches = items.filter((item) => {
-        const label = dom.textOf(item);
-        const inner = label.match(/\(([^)]*)\)\s*$/);
-        return accepted.includes(text.normalize(label.replace(/\s*\([^)]*\)\s*$/, ''))) || (inner && accepted.includes(text.normalize(inner[1])));
-      });
-      if (matches.length === 1) aliased = matches[0];
-    }
-    const direct = items.find((item) => /등록하기/.test(dom.textOf(item)));
-    let chosen = exact || aliased;
-    if (!chosen && direct && register) chosen = direct;
     if (!chosen) {
-      const names = items.map(dom.textOf).filter((name) => !/등록하기/.test(name));
       await close();
-      return missingOption(names, [value]);
+      if (!list && !seen.length) return { ok: false, reason: `'${value}' 검색 결과를 불러오지 못했습니다.` };
+      return missingOption(seen, [value]);
     }
     const chosenName = chosen === direct ? wanted : nameOf(chosen);
-    const chosenLabel = dom.textOf(chosen);
+    const chosenLabel = chosen === direct ? String(value) : dom.textOf(chosen);
     chosen.click();
     const shown = await dom.waitFor(
       () => !searchResults(input) && (!input.isConnected || text.normalize(input.value) === chosenName) && text.normalize(dom.textOf(scope)).includes(chosenName),
       { timeout: 2000 }
     );
-    if (!shown) return { ok: false, reason: '항목을 골랐지만 화면에 반영되지 않았습니다.' };
-    if (chosen === aliased) return { ok: true, review: `목록의 '${chosenLabel}' 항목을 골랐습니다.` };
+    if (!shown) return { ok: false, reason: `'${chosenLabel}'을(를) 골랐지만 화면에 반영되지 않았습니다.` };
+    if (found && found.aliased) return { ok: true, review: `'${value}'을(를) 목록의 '${chosenLabel}'(으)로 골랐습니다. 같은 항목인지 확인해 주세요.`, detail: chosenLabel };
     if (chosen === direct) {
-      return register === 'review' ? { ok: true, review: '목록에 같은 이름이 없어 직접 등록했습니다. 공식 명칭인지 확인해 주세요.' } : { ok: true, detail: '직접 등록' };
+      const similar = seen.filter((name) => nameVariants(name).some((variant) => nameVariants(value).some((mine) => variant.includes(mine) || mine.includes(variant)))).slice(0, 3);
+      const hint = similar.length ? ` 목록의 비슷한 항목: ${similar.map((name) => `'${name}'`).join(', ')}.` : '';
+      return register === 'review'
+        ? { ok: true, review: `'${value}'이(가) 목록에 없어 직접 등록했습니다. 공식 명칭인지 확인해 주세요.${hint}`, directRegistered: true }
+        : { ok: true, detail: `'${value}' 직접 등록`, directRegistered: true };
     }
     return true;
   }
+
 
   // ---------------------------------------------------------------------------
   // 마이다스인 (jQuery + Dates 플러그인)
@@ -852,6 +892,7 @@
     segmentSelected,
     fillAddressDialog,
     fillSearchList,
+    nameVariants,
     addressKey,
     fillAntDropdown,
     fillAntDate,

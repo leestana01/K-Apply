@@ -17,7 +17,11 @@
   let busy = false;
 
   async function execute() {
-    if (busy) return { ok: false, code: 'BUSY', message: '이미 입력 중입니다.' };
+    if (busy) {
+      const result = { ok: false, code: 'BUSY', message: '이미 입력 중입니다. 끝나면 결과가 이 자리에 표시됩니다.' };
+      showToast(result);
+      return result;
+    }
     busy = true;
     setLauncherBusy(true);
     try {
@@ -70,6 +74,8 @@
     .toast .ok { color: #15803d; } .toast .warn { color: #b45309; } .toast .err { color: #b91c1c; }
     .toast ul { margin: 6px 0 0; padding-left: 18px; }
     .toast li { margin: 2px 0; }
+    .toast.fresh { animation: kapply-pop .35s ease; box-shadow: 0 0 0 3px rgba(34,197,94,.55), 0 16px 40px rgba(17,24,39,.22); }
+    @keyframes kapply-pop { from { transform: translateY(6px); opacity: .4; } to { transform: none; opacity: 1; } }
     .toast .close { float: right; border: 0; background: transparent; font-size: 16px; cursor: pointer; color: #6b7280; }
     @media (prefers-color-scheme: dark) {
       .toast { background: #1f2937; color: #f9fafb; }
@@ -82,9 +88,20 @@
   let toast = null;
   let toastTimer = null;
 
+  let ownHost = null;
+
+  /** 확장프로그램 갱신 전 인스턴스가 남긴 버튼·결과 창(다른 호스트)을 치운다. */
+  function removeStaleHosts() {
+    document.querySelectorAll(`#${HOST_ID}`).forEach((node) => {
+      if (node !== ownHost) node.remove();
+    });
+  }
+
   function ensureHost() {
-    if (shadow && document.getElementById(HOST_ID)) return shadow;
+    removeStaleHosts();
+    if (shadow && ownHost && ownHost.isConnected) return shadow;
     const host = document.createElement('div');
+    ownHost = host;
     host.id = HOST_ID;
     document.documentElement.appendChild(host);
     shadow = host.attachShadow({ mode: 'closed' });
@@ -108,6 +125,7 @@
   }
 
   function renderLauncher(status) {
+    if (launcher && !launcher.isConnected) launcher = null;
     if (launcher) {
       launcher.style.setProperty('--accent', platforms.describe(status.platform).color);
       return;
@@ -152,7 +170,18 @@
     return node;
   }
 
+  function timeLabel() {
+    return new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  /** 결과 항목 제목: 섹션(항목 이름 포함, 예 '자격증 · SQLD')과 칸 이름을 함께 보여 준다. */
+  function entryTitle(entry) {
+    if (!entry.section || entry.section === entry.label) return entry.label;
+    return `${entry.section} · ${entry.label}`;
+  }
+
   function showToast(result) {
+    // 이전 결과 창은 닫지 않았더라도 치우고 새 결과를 보여 준다.
     if (toast) toast.remove();
     clearTimeout(toastTimer);
     toast = el('div', 'toast');
@@ -164,10 +193,10 @@
     toast.appendChild(close);
 
     if (!result.ok) {
-      toast.append(el('h2', null, 'K-Apply'), el('div', 'err', result.message || '입력하지 못했습니다.'));
+      toast.append(el('h2', null, `K-Apply · ${timeLabel()}`), el('div', result.code === 'BUSY' ? 'warn' : 'err', result.message || '입력하지 못했습니다.'));
     } else {
       const { counts, entries, notices } = result.report;
-      toast.appendChild(el('h2', null, `${result.platformName} 자동 입력 결과`));
+      toast.appendChild(el('h2', null, `${result.platformName} 자동 입력 결과 · ${timeLabel()}`));
       const summary = el('div', 'counts');
       summary.append(
         el('span', 'ok', `입력 ${counts.filled + counts.review}`),
@@ -184,7 +213,7 @@
         const list = el('ul');
         attention.forEach((entry) =>
           list.appendChild(
-            el('li', entry.status === 'failed' ? 'err' : 'warn', `${entry.status === 'failed' ? '실패 · ' : '확인 · '}${entry.label}${entry.detail ? ` — ${entry.detail}` : ''}`)
+            el('li', entry.status === 'failed' ? 'err' : 'warn', `${entry.status === 'failed' ? '실패 · ' : '확인 · '}${entryTitle(entry)}${entry.detail ? ` — ${entry.detail}` : ''}`)
           )
         );
         notices.forEach((notice) => list.appendChild(el('li', null, notice)));
@@ -192,6 +221,8 @@
       }
     }
     wrapElement().prepend(toast);
+    toast.classList.add('fresh');
+    setTimeout(() => toast && toast.classList.remove('fresh'), 900);
     // 실패나 확인할 항목이 있으면 사용자가 닫을 때까지 남겨 둔다.
     const counts = result.ok ? result.report.counts : null;
     const clean = counts && counts.failed + counts.review + counts.manual === 0;
@@ -206,8 +237,21 @@
   let showLauncher = true;
   let refreshTimer = null;
 
+  /** 확장프로그램이 갱신되면 이 인스턴스는 더 동작할 수 없으므로 화면에서 스스로 물러난다. */
+  function orphaned() {
+    try {
+      return !chrome.runtime || !chrome.runtime.id;
+    } catch (error) {
+      return true;
+    }
+  }
+
   function refresh() {
     refreshTimer = null;
+    if (orphaned()) {
+      if (ownHost) ownHost.remove();
+      return;
+    }
     const detected = platforms.detect(document, location);
     const eligible = detected && detected.formReady && showLauncher && hiddenForPage !== location.pathname;
     if (eligible) renderLauncher({ platform: detected.id, name: detected.name });
