@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-28
+
+### 수정
+
+- 마이다스인 새 화면: 여러 개를 받는 학내외활동·프로젝트·수상 등을 **1건만 넣고 "1건까지 받습니다"라고 잘못 안내**하던 문제
+  - 첫 블록이 생기면 추가 칸이 버튼이 아니라 블록 아래의 점선 상자(div)로 바뀌는데, 버튼만 찾고 있었음
+  - 블록이 여러 개면 머리글에 번호가 붙는데('- 학내외활동 2'), 정확히 같은 머리글만 찾아 새 블록을 알아보지 못했음
+- 개수 초과 안내가 기업 규칙을 단정하지 않고 관찰한 사실("지원서에 N건이 들어가 있고 더 추가할 수 없어")만 적도록 수정
+
 ## [1.10.0] - 2026-09-28
 
 마이다스인 새 화면을 교보증권 기준으로만 구현해, 같은 새 화면이라도 기업 설정이 다른 DB Inc에서 대부분 채워지지 않던 문제를 고쳤습니다.
@@ -197,7 +206,8 @@
 - 스키마 기반 프로필 편집 화면, 자동 저장, JSON 내보내기·가져오기, 전체 삭제
 - 이미 입력된 칸 보존 및 덮어쓰기 설정
 
-[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/leestana01/K-Apply/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/leestana01/K-Apply/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/leestana01/K-Apply/compare/v1.9.1...v1.10.0
 [1.9.1]: https://github.com/leestana01/K-Apply/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/leestana01/K-Apply/compare/v1.8.1...v1.9.0
