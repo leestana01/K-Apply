@@ -1487,9 +1487,19 @@
       const trigger = row && row !== document.body ? visibleControls('button', row).find((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button))) : null;
       await applyRequiredDropdown(session, { section, label: '활용 구분', trigger, value: entry.category, hint: `'${entry.name}'의 활용 구분` });
       await applyText(session, { section, label: '프로그램명', input, value: entry.name });
-      // 활용구분·프로그램명을 넣어야 수준 버튼과 사용기간 선택이 나타난다.
-      await dom.sleep(300);
-      if (row && row !== document.body) await fillSkillDetails(session, section, row, entry);
+      // 활용구분·프로그램명을 넣어야 수준 버튼과 사용기간 선택이 나타난다. 이 칸들은 활용구분이 있는
+      // 영역보다 바깥에 생기므로, 이 행(프로그램명 칸이 하나뿐인 조상)에서 다시 찾는다.
+      const detailRow = await dom.waitFor(() => {
+        let node = input.parentElement;
+        for (let depth = 0; depth < 8 && node && node !== document.body; depth += 1) {
+          if (node.querySelectorAll('input[name$=".softwareName"]').length > 1) return null;
+          if (node.querySelector('button[data-value]') || [...node.querySelectorAll('button')].some((button) => /사용\s*기간/.test(dom.textOf(button)))) return node;
+          node = node.parentElement;
+        }
+        return null;
+      }, { timeout: 1500 });
+      if (detailRow) await fillSkillDetails(session, section, detailRow, entry);
+      else if (!text.isBlank(entry.level) || !text.isBlank(entry.years)) session.manual(section, '활용 수준 · 사용 기간', `'${entry.name}'의 수준·사용기간 칸이 나타나지 않았습니다. 직접 선택해 주세요.`);
     }
   }
 
