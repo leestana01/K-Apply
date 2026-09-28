@@ -183,6 +183,13 @@
           options: [['', '선택 안 함'], ...REGIONS.map((region) => [region, region])],
         },
         {
+          key: 'track',
+          label: '계열 (고등학교)',
+          type: 'text',
+          placeholder: '인문',
+          hint: '고등학교 계열(인문·자연·상업·공업 등). 계열을 묻는 지원서에서 사용합니다.',
+        },
+        {
           key: 'entryType',
           label: '입학 구분',
           type: 'select',

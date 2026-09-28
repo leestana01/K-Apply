@@ -507,10 +507,10 @@
    * 블록 머리글은 "- 고등학교" 텍스트이고, 머리글에서 조상으로 올라가며 marker 입력칸을 처음 포함하는 요소가 블록이다.
    */
   const BLOCKS = {
-    highschool: { name: '고등학교', marker: 'input[placeholder="입학일"]', title: '고등학교' },
-    college: { name: '대학교', marker: 'input[placeholder="입학일"]', title: '대학교' },
-    graduate: { name: '대학원', marker: 'input[placeholder="입학일"]', title: '대학원' },
-    career: { name: '직장경력', marker: 'input[placeholder="입사일"]', title: '경력' },
+    highschool: { name: '고등학교', marker: 'input[placeholder^="입학"]', title: '고등학교' },
+    college: { name: '대학교', marker: 'input[placeholder^="입학"]', title: '대학교' },
+    graduate: { name: '대학원', marker: 'input[placeholder^="입학"]', title: '대학원' },
+    career: { name: '직장경력', marker: 'input[placeholder^="입사"]', title: '경력' },
     project: { name: '프로젝트', marker: 'input[name$=".projectName"]', title: '프로젝트' },
     award: { name: '수상경력', marker: 'input[name$=".awardName"]', title: '수상' },
     activity: { name: '학내외활동', marker: 'input[name^="activityAnswers."][name$=".organization"]', title: '학내외활동' },
@@ -704,12 +704,24 @@
     });
     if (status === STATUS.FAILED) return;
 
-    await applyDropdown(session, {
-      section,
-      label: '소재지',
-      trigger: pickerIn(/^학교\s*정보/, block),
-      candidates: regionCandidates(entry.region),
-    });
+    // 학교정보 행의 선택 칸(소재지, 고등학교 계열 등)은 안내 문구 또는 현재 값으로 구분한다.
+    const infoRow = rowIn(block, /^학교\s*정보/);
+    const infoPickers = infoRow
+      ? visibleControls('button', infoRow).filter((button) => button.type === 'button' && !isSegment(button) && !button.closest('ul'))
+      : [];
+    const REGION = /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|해외|미국|일본|중국|기타.*|.*특별시|.*광역시|.*도)$/;
+    const regionPicker = infoPickers.find((button) => /소재지/.test(dom.textOf(button)) || REGION.test(dom.textOf(button)));
+    const trackPicker = infoPickers.find((button) => button !== regionPicker && (/계열/.test(dom.textOf(button)) || !/선택/.test(dom.textOf(button))));
+    await applyDropdown(session, { section, label: '소재지', trigger: regionPicker, candidates: regionCandidates(entry.region) });
+    if (trackPicker) {
+      const track = String(entry.track || '').trim();
+      if (!track) {
+        if (/선택/.test(dom.textOf(trackPicker))) session.manual(section, '계열', `프로필에 '${entry.school}'의 계열이 없습니다. 옵션 화면의 학력에 입력해 주세요.`);
+      } else {
+        // '인문계'처럼 끝에 '계'를 붙여 적어도 선택지 '인문'과 맞춘다.
+        await applyDropdown(session, { section, label: '계열', trigger: trackPicker, candidates: [...new Set([track, track.replace(/계$/, '')])] });
+      }
+    }
     if (entry.campusType) {
       await applySegment(session, {
         section,
@@ -722,8 +734,8 @@
       await applySegment(session, { section, label: '주간 / 야간', group: segmentIn(block, /^학교\s*정보/, /주간|야간/), candidates: [entry.dayNight] });
     }
 
-    await applyDate(session, { section, label: '입학일', input: block.querySelector('input[placeholder="입학일"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
-    await applyDate(session, { section, label: '졸업일', input: block.querySelector('input[placeholder="졸업일"]'), value: endDate(entry.endDate) });
+    await applyDate(session, { section, label: '입학일', input: block.querySelector('input[placeholder^="입학"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '졸업일', input: block.querySelector('input[placeholder^="졸업"]'), value: endDate(entry.endDate) });
     await applySegment(session, { section, label: '졸업 구분', group: segmentIn(block, /^졸업\s*구분/), candidates: STATUS_CANDIDATES[entry.status] || (entry.status ? [entry.status] : []) });
     if (entry.entryType) {
       await applySegment(session, { section, label: '입학 구분', group: segmentIn(block, /^입학\s*구분/), candidates: [entry.entryType] });
@@ -839,9 +851,9 @@
 
       await applyDropdown(session, { section, label: '고용 형태', trigger: pickerIn(/^고용\s*형태/, block), candidates: entry.employmentType ? [entry.employmentType] : [] });
       await applySegment(session, { section, label: '재직 여부', group: segmentIn(block, /^근무\s*기간/), candidates: [entry.current ? '재직중' : '퇴사'] });
-      await applyDate(session, { section, label: '입사일', input: block.querySelector('input[placeholder="입사일"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '입사일', input: block.querySelector('input[placeholder^="입사"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       if (!entry.current) {
-        await applyDate(session, { section, label: '퇴사일', input: block.querySelector('input[placeholder="퇴사일"]'), value: endDate(entry.endDate) });
+        await applyDate(session, { section, label: '퇴사일', input: block.querySelector('input[placeholder^="퇴사"]'), value: endDate(entry.endDate) });
       }
 
       const search = block.querySelector(COMPANY_SEARCH);
@@ -908,7 +920,7 @@
       } else {
         await applyText(session, { section, label: rowLabel(workplace) || '근무처', input: workplace, value: entry.organization });
       }
-      const period = visibleControls('input[placeholder="기간"], input[placeholder="프로젝트 기간"]', block);
+      const period = visibleControls('input[placeholder="기간"], input[placeholder$="기간"]', block);
       await applyDate(session, { section, label: '시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       if (!text.isBlank(entry.endDate)) await applyDate(session, { section, label: '종료', input: period[1], value: endDate(entry.endDate) });
       await applyText(session, { section, label: '참여 역할', input: block.querySelector('input[name$=".role"]'), value: entry.role });
@@ -1094,9 +1106,9 @@
   async function fillExamFields(session, section, register, entry) {
     const index = register.name.slice(EXAM_PREFIX.length).split('.')[0];
     const field = (key) => document.querySelector(`input[name="${EXAM_PREFIX}${index}.${key}"]`);
-    const box = rowOfSearch(register, 'input[placeholder="응시일"]');
+    const box = rowOfSearch(register, 'input[placeholder^="응시"]');
     await applyText(session, { section, label: '등록 번호', input: register, value: entry.number });
-    await applyDate(session, { section, label: '응시일', input: box && box.querySelector('input[placeholder="응시일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '응시일', input: box && box.querySelector('input[placeholder^="응시"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
     const score = field('examScore.score');
     if (score) {
       await applyText(session, { section, label: '점수', input: score, value: entry.score });
@@ -1172,9 +1184,9 @@
 
   async function fillLicenseFields(session, section, organization, entry) {
     const index = organization.name.slice(LICENSE_PREFIX.length).split('.')[0];
-    const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
+    const box = rowOfSearch(organization, 'input[placeholder^="취득"]');
     await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
-    await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder^="취득"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
     const register = document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`);
     if (!register && !text.isBlank(entry.number)) {
       session.manual(section, '자격 번호', `이 행에는 자격 번호 칸이 없어(목록에 없는 자격증을 직접 등록한 경우) '${entry.number}'을(를) 넣지 못했습니다. 목록에서 자격증을 다시 골라 주세요.`);
@@ -1238,7 +1250,7 @@
       const section = `수상 · ${entry.name}`;
       await applyText(session, { section, label: '상훈명', input: block.querySelector('input[name$=".awardName"]'), value: entry.name });
       await applyText(session, { section, label: '수여 기관', input: block.querySelector('input[name$=".organization"]'), value: entry.issuer });
-      await applyDate(session, { section, label: '수상일', input: block.querySelector('input[placeholder="발급일"], input[placeholder="수상일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '수상일', input: block.querySelector('input[placeholder^="발급"], input[placeholder^="수상"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
       await applyText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".comment"]'), value: entry.description });
     }
   }
@@ -1258,7 +1270,7 @@
       const section = `학내외활동 · ${name}`;
       await applyDropdown(session, { section, label: '활동 구분', trigger: pickerIn(/^활동\s*구분/, block), candidates: text.candidatesFor('activityType', entry.type) });
       await applyText(session, { section, label: '기관 및 조직명', input: block.querySelector('input[name$=".organization"]'), value: name });
-      const period = visibleControls('input[placeholder="활동기간"]', block);
+      const period = visibleControls('input[placeholder$="기간"]', block);
       await applyDate(session, { section, label: '활동 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       await applyDate(session, { section, label: '활동 종료', input: period[1], value: endDate(entry.endDate) });
       await applyText(session, { section, label: '역할', input: block.querySelector('input[name$=".role"]'), value: entry.role });
