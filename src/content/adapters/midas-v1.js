@@ -1487,6 +1487,50 @@
       const trigger = row && row !== document.body ? visibleControls('button', row).find((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button))) : null;
       await applyRequiredDropdown(session, { section, label: '활용 구분', trigger, value: entry.category, hint: `'${entry.name}'의 활용 구분` });
       await applyText(session, { section, label: '프로그램명', input, value: entry.name });
+      // 활용구분·프로그램명을 넣어야 수준 버튼과 사용기간 선택이 나타난다.
+      await dom.sleep(300);
+      if (row && row !== document.body) await fillSkillDetails(session, section, row, entry);
+    }
+  }
+
+  /**
+   * 수준 버튼: div > button[data-value] 묶음, 선택된 버튼만 배경색이 다르다(기본 선택 '입문').
+   * 사용기간: '사용기간 선택' 드롭다운(1년 … 10년이상).
+   */
+  async function fillSkillDetails(session, section, row, entry) {
+    const chips = visibleControls('button[data-value]', row);
+    if (chips.length && !text.isBlank(entry.level)) {
+      // 선택된 버튼: 대부분의 버튼과 배경색이 다른 하나
+      const selected = () => {
+        const counts = new Map();
+        chips.forEach((chip) => {
+          const color = getComputedStyle(chip).backgroundColor;
+          counts.set(color, (counts.get(color) || 0) + 1);
+        });
+        const common = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        return chips.find((chip) => getComputedStyle(chip).backgroundColor !== common) || null;
+      };
+      const candidates = text.candidatesFor('skillLevel', entry.level);
+      const index = text.pickOption(chips.map(dom.textOf), candidates);
+      await session.apply({
+        section,
+        label: '활용 수준',
+        value: candidates,
+        filled: index >= 0 && selected() === chips[index],
+        run: async () => {
+          if (index < 0) return { ok: false, reason: `수준 선택지(${chips.map(dom.textOf).join(', ')})에 '${entry.level}'에 해당하는 항목이 없습니다.` };
+          chips[index].click();
+          await dom.sleep(250);
+          return selected() === chips[index] || { ok: false, reason: `'${dom.textOf(chips[index])}'을(를) 눌렀지만 선택되지 않았습니다.` };
+        },
+      });
+    }
+    const period = visibleControls('button', row).find((button) => /사용\s*기간/.test(dom.textOf(button)) || /^\d+\s*년(이상)?$/.test(dom.textOf(button)));
+    const years = text.digitsOnly(entry.years || '');
+    if (period && years) {
+      const count = Number(years);
+      const candidates = count >= 10 ? [`${count}년`, '10년이상', '10년 이상'] : [`${count}년`];
+      await applyDropdown(session, { section, label: '사용 기간', trigger: period, candidates });
     }
   }
 

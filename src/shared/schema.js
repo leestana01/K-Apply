@@ -378,7 +378,8 @@
           hint: 'OA · 언어 · 그래픽 · 공학용 · 기타 등 지원서의 선택지와 같은 표기로 입력하세요.',
         },
         { key: 'name', label: '프로그램명', type: 'text', placeholder: 'Excel / Java' },
-        { key: 'level', label: '활용 수준', type: 'text', placeholder: '상 / 중 / 하' },
+        { key: 'level', label: '활용 수준', type: 'text', placeholder: '중급', hint: '입문 · 초급 · 중급 · 고급 · 특급 또는 상 · 중 · 하' },
+        { key: 'years', label: '사용 기간(년)', type: 'number', placeholder: '3' },
       ],
     },
     {
