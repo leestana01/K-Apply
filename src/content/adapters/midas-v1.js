@@ -563,8 +563,28 @@
     );
   }
 
-  const adderOf = (kind) =>
-    visibleControls('button').find((button) => new RegExp(`^\\+?\\s*${BLOCKS[kind].name}\\s*\\*?$`).test(dom.textOf(button)));
+  /**
+   * 블록 추가 칸. 처음에는 '+ 학내외활동' 버튼이지만, 블록이 하나 생기면 블록 아래의 점선 상자(div)로 바뀌는
+   * 기업이 있다. 버튼이 없으면 마지막 블록과 같은 영역 안에서 이름이 같은 요소를 찾는다
+   * (오른쪽 목차에도 같은 이름이 있으므로 블록 영역 밖은 보지 않는다).
+   */
+  function adderOf(kind) {
+    const pattern = new RegExp(`^\\+?\\s*${BLOCKS[kind].name}\\s*\\*?$`);
+    const button = visibleControls('button').find((element) => pattern.test(dom.textOf(element)));
+    if (button) return button;
+    const blocks = blocksOf(kind);
+    if (!blocks.length) return null;
+    let scope = blocks[blocks.length - 1].parentElement;
+    for (let depth = 0; depth < 4 && scope && scope !== document.body; depth += 1) {
+      const found = [...scope.querySelectorAll('div, span, a, [role="button"]')].filter(
+        (element) => dom.isVisible(element) && !element.querySelector(CONTROL) && !blocks.some((block) => block.contains(element)) && pattern.test(dom.textOf(element))
+      );
+      // 가장 안쪽 요소를 누르면 클릭이 추가 상자의 처리기까지 전달된다.
+      if (found.length) return found.find((element) => !found.some((other) => other !== element && element.contains(other))) || found[0];
+      scope = scope.parentElement;
+    }
+    return null;
+  }
 
   async function addBlock(kind) {
     const adder = adderOf(kind);
