@@ -1468,11 +1468,8 @@
     }
     for (const [position, entry] of entries.entries()) {
       const section = `컴퓨터 활용 능력 · ${entry.name}`;
-      if (names().some((input) => text.normalize(input.value) === text.normalize(entry.name))) {
-        session.report.add(STATUS.SKIPPED, '컴퓨터 활용 능력', entry.name, '이미 입력됨');
-        continue;
-      }
-      let input = names().find((element) => !controls.hasValue(element));
+      // 이미 입력된 프로그램도 비어 있는 활용구분·수준·사용기간은 채운다.
+      let input = names().find((element) => text.normalize(element.value) === text.normalize(entry.name)) || names().find((element) => !controls.hasValue(element));
       if (!input) {
         const before = names();
         const added = await addSearchRow(pattern, 'input[name$=".softwareName"]', before.length);
