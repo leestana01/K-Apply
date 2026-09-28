@@ -603,10 +603,13 @@
 
   async function applySegment(session, { section, label, group, candidates }) {
     if (!group.length || !candidates.length) return;
+    const current = segmentValue(group);
     await session.apply({
       section,
       label,
       value: candidates,
+      // 이미 원하는 값이 선택돼 있으면 건너뛴다(기본 선택이 원하는 값과 같은 경우 포함).
+      filled: !!current && text.pickOption([current], candidates) === 0,
       run: () => controls.fillSegment(group, candidates),
     });
   }
@@ -649,13 +652,14 @@
    * @returns {Promise<Array<{entry:object, block:HTMLElement}>>}
    */
   async function allocate(session, { kind, sourceId, entries, nameOf, identity }) {
-    const section = BLOCKS[kind].title;
     const existing = blocksOf(kind);
     const pending = [];
+    // 같은 이름이 이미 입력된 블록도 비어 있는 칸은 채운다(칸마다 '이미 입력됨'이면 건너뛴다).
+    const filled = [];
     for (const entry of entries) {
       const name = nameOf(entry);
       const same = existing.find((block) => identity(block) && text.normalize(identity(block)).includes(text.normalize(name)));
-      if (same) session.report.add(STATUS.SKIPPED, section, name, '이미 입력됨');
+      if (same) filled.push({ entry, block: same });
       else pending.push(entry);
     }
     const free = existing.filter((block) => !identity(block));
@@ -668,8 +672,9 @@
       free.push(block);
     }
     const capacity = Math.min(free.length, pending.length);
-    session.overflow(section, sourceId, pending.slice(capacity), blocksOf(kind).length);
-    return session.chronological(sourceId, pending.slice(0, capacity)).map((entry, index) => ({ entry, block: free[index] }));
+    session.overflow(BLOCKS[kind].title, sourceId, pending.slice(capacity), blocksOf(kind).length);
+    const placed = session.chronological(sourceId, pending.slice(0, capacity)).map((entry, index) => ({ entry, block: free[index] }));
+    return [...filled, ...placed];
   }
 
   const DEGREE = { university: ['학사'], college: ['전문학사'], master: ['석사'], doctor: ['박사', '석박사통합'] };
@@ -1282,9 +1287,14 @@
    * 칸에서 가까운 조상부터 올라가며 컨트롤이 없는 첫 텍스트 요소를 찾는다.
    */
   function itemName(element) {
+    for (const kind of Object.keys(BLOCKS)) {
+      if (blocksOf(kind).some((block) => block.contains(element))) return BLOCKS[kind].name;
+    }
     let node = element.parentElement;
     for (let depth = 0; depth < 7 && node && node !== document.body; depth += 1) {
-      const title = [...node.querySelectorAll('p')].find((candidate) => !candidate.querySelector(CONTROL) && dom.textOf(candidate) && dom.textOf(candidate).length < 40 && dom.textOf(candidate) !== '/');
+      const title = [...node.querySelectorAll('p')].find(
+        (candidate) => !candidate.closest('button') && !candidate.querySelector(CONTROL) && dom.textOf(candidate) && dom.textOf(candidate).length < 40 && dom.textOf(candidate) !== '/'
+      );
       if (title) return dom.textOf(title).replace(/^-\s*/, '');
       node = node.parentElement;
     }
