@@ -513,7 +513,10 @@
     career: { name: '직장경력', marker: 'input[placeholder^="입사"]', title: '경력' },
     project: { name: '프로젝트', marker: 'input[name$=".projectName"]', title: '프로젝트' },
     award: { name: '수상경력', marker: 'input[name$=".awardName"]', title: '수상' },
-    activity: { name: '학내외활동', marker: 'input[name^="activityAnswers."][name$=".organization"]', title: '학내외활동' },
+    activity: { name: '학내외활동', marker: 'input[name*="activityAnswers."][name$=".organization"]', title: '학내외활동' },
+    training: { name: '교육이수사항', marker: 'input[name$=".educationName"]', title: '교육 이수' },
+    overseas: { name: '해외경험', marker: 'textarea[name*="overseasExperience"]', title: '해외경험' },
+    volunteer: { name: '봉사활동', marker: 'input[name*="volunteerActivity"][name$=".organization"]', title: '봉사활동' },
   };
 
   const SCHOOL_SEARCH = 'input[placeholder^="학교명을 검색"]';
@@ -1255,13 +1258,34 @@
     }
   }
 
+  const hasBlocks = (kind) => !!(adderOf(kind) || blocksOf(kind).length);
+
+  /** 활동 구분별로 넣을 블록: 봉사활동·해외경험 블록이 따로 있으면 그쪽, 없으면 학내외활동 */
+  function activityKind(entry) {
+    if (entry.type === '봉사활동' && hasBlocks('volunteer')) return 'volunteer';
+    if (entry.type === '해외경험' && hasBlocks('overseas')) return 'overseas';
+    return 'activity';
+  }
+
+  const joinContents = (entry) => [entry.organization && entry.name && entry.name !== entry.organization ? entry.name : '', entry.description].filter(Boolean).join(' - ');
+
+  /** 필수 선택 칸인데 프로필에 값이 없으면 항목 이름과 함께 알린다. */
+  async function applyRequiredDropdown(session, { section, label, trigger, value, hint }) {
+    if (!trigger) return;
+    if (text.isBlank(value)) {
+      if (/선택/.test(dom.textOf(trigger)) || dom.textOf(trigger) === label) session.manual(section, label, `프로필에 ${hint}이(가) 없습니다. 옵션 화면에서 입력하거나 직접 선택해 주세요.`);
+      return;
+    }
+    await applyDropdown(session, { section, label, trigger, candidates: [String(value).trim()] });
+  }
+
   async function fillActivities(session) {
     if (!adderOf('activity') && !blocksOf('activity').length) return;
     const orName = (entry) => entry.organization || entry.name;
     const pairs = await allocate(session, {
       kind: 'activity',
       sourceId: 'activities',
-      entries: session.list('activities').filter((entry) => !text.isBlank(orName(entry))),
+      entries: session.list('activities').filter((entry) => !text.isBlank(orName(entry)) && activityKind(entry) === 'activity'),
       nameOf: orName,
       identity: inputIdentity('input[name$=".organization"]'),
     });
@@ -1340,7 +1364,114 @@
     );
   }
 
-  const hasStep3Sections = () => !!(rowAdder(/^공인\s*외국어/) || rowAdder(/^자격증/) || adderOf('award') || adderOf('activity') || blocksOf('award').length || blocksOf('activity').length);
+  async function fillVolunteer(session) {
+    if (!hasBlocks('volunteer')) return;
+    const orName = (entry) => entry.organization || entry.name;
+    const pairs = await allocate(session, {
+      kind: 'volunteer',
+      sourceId: 'activities',
+      entries: session.list('activities').filter((entry) => entry.type === '봉사활동' && !text.isBlank(orName(entry))),
+      nameOf: orName,
+      identity: inputIdentity('input[name*="volunteerActivity"][name$=".organization"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const name = orName(entry);
+      const section = `봉사활동 · ${name}`;
+      await applyRequiredDropdown(session, { section, label: '봉사 구분', trigger: pickerIn(/^봉사\s*구분/, block), value: entry.detailType, hint: `'${name}'의 봉사 분야(세부 구분)` });
+      await applyText(session, { section, label: '주관 기관', input: block.querySelector('input[name$=".organization"]'), value: name });
+      const period = visibleControls('input[placeholder$="기간"]', block);
+      await applyDate(session, { section, label: '활동 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '활동 종료', input: period[1], value: endDate(entry.endDate) });
+      await applyText(session, { section, label: '봉사 시간', input: block.querySelector('input[name$=".time"]'), value: text.digitsOnly(entry.hours || '') });
+      await applyRequiredDropdown(session, { section, label: '봉사 지역', trigger: pickerIn(/^봉사\s*지역/, block), value: entry.location, hint: `'${name}'의 봉사 지역` });
+      await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".comment"]'), value: joinContents(entry) });
+    }
+  }
+
+  async function fillOverseas(session) {
+    if (!hasBlocks('overseas')) return;
+    const pairs = await allocate(session, {
+      kind: 'overseas',
+      sourceId: 'activities',
+      entries: session.list('activities').filter((entry) => entry.type === '해외경험' && !text.isBlank(entry.name || entry.location)),
+      nameOf: (entry) => entry.name || entry.location,
+      // 해외경험은 이름 칸이 없어 상세 내용으로 같은 항목인지 판단한다.
+      identity: inputIdentity('textarea[name*="overseasExperience"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const name = entry.name || entry.location;
+      const section = `해외경험 · ${name}`;
+      await applyRequiredDropdown(session, { section, label: '해외경험 목적', trigger: pickerIn(/^해외\s*경험\s*목적/, block), value: entry.detailType, hint: `'${name}'의 해외경험 목적(세부 구분)` });
+      await applyRequiredDropdown(session, { section, label: '국가', trigger: pickerIn(/^국가/, block), value: entry.location, hint: `'${name}'의 국가` });
+      await applyDate(session, { section, label: '출국', input: block.querySelector('input[placeholder^="출국"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '입국', input: block.querySelector('input[placeholder^="입국"]'), value: endDate(entry.endDate) });
+      await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name*="overseasExperience"]'), value: [entry.name, entry.description].filter(Boolean).join(' - ') });
+    }
+  }
+
+  async function fillTrainings(session) {
+    if (!hasBlocks('training')) return;
+    const pairs = await allocate(session, {
+      kind: 'training',
+      sourceId: 'trainings',
+      entries: session.list('trainings').filter((entry) => !text.isBlank(entry.course)),
+      nameOf: (entry) => entry.course,
+      identity: inputIdentity('input[name$=".educationName"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const section = `교육 이수 · ${entry.course}`;
+      await applyText(session, { section, label: '교육명', input: block.querySelector('input[name$=".educationName"]'), value: entry.course });
+      await applyText(session, { section, label: '교육 기관', input: block.querySelector('input[name$=".organization"]'), value: entry.institution });
+      const period = visibleControls('input[placeholder$="기간"]', block);
+      await applyDate(session, { section, label: '이수 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '이수 종료', input: period[1], value: endDate(entry.endDate) });
+      await applyText(session, { section, label: '교육 시간', input: block.querySelector('input[name$=".time"]'), value: text.digitsOnly(entry.hours || '') });
+      await applyLongText(session, { section, label: '교육 과정', input: block.querySelector('textarea[name$=".comment"]'), value: entry.description });
+    }
+  }
+
+  /** 컴퓨터활용능력: [추가하기]로 행을 만들고 활용구분 드롭다운과 프로그램명을 채운다. */
+  async function fillSkills(session) {
+    const pattern = /^컴퓨터/;
+    const adder = rowAdder(pattern);
+    const names = () => visibleControls('input[name$=".softwareName"]');
+    if (!adder && !names().length) return;
+    const entries = session.list('skills').filter((entry) => !text.isBlank(entry.name));
+    if (!entries.length) {
+      let row = adder && adder.parentElement;
+      while (row && row !== document.body && !pattern.test(text.cleanLabel(dom.textOf(row)))) row = row.parentElement;
+      const required = row && row !== document.body && /\*/.test(dom.textOf(row).slice(0, 20));
+      if (!names().some((input) => controls.hasValue(input)) && required) {
+        session.manual('컴퓨터 활용 능력', '컴퓨터활용능력', '이 지원서의 필수 항목인데 프로필에 컴퓨터 활용 능력이 없습니다. 옵션 화면의 "컴퓨터 활용 능력"에 추가해 주세요.');
+      }
+      return;
+    }
+    for (const [position, entry] of entries.entries()) {
+      const section = `컴퓨터 활용 능력 · ${entry.name}`;
+      if (names().some((input) => text.normalize(input.value) === text.normalize(entry.name))) {
+        session.report.add(STATUS.SKIPPED, '컴퓨터 활용 능력', entry.name, '이미 입력됨');
+        continue;
+      }
+      let input = names().find((element) => !controls.hasValue(element));
+      if (!input) {
+        const before = names();
+        const added = await addSearchRow(pattern, 'input[name$=".softwareName"]', before.length);
+        input = added || null;
+      }
+      if (!input) {
+        session.overflow('컴퓨터 활용 능력', 'skills', entries.slice(position), names().length);
+        break;
+      }
+      let row = input.parentElement;
+      while (row && row !== document.body && !visibleControls('button', row).some((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button)))) row = row.parentElement;
+      const trigger = row && row !== document.body ? visibleControls('button', row).find((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button))) : null;
+      await applyRequiredDropdown(session, { section, label: '활용 구분', trigger, value: entry.category, hint: `'${entry.name}'의 활용 구분` });
+      await applyText(session, { section, label: '프로그램명', input, value: entry.name });
+    }
+  }
+
+  const hasStep3Sections = () =>
+    !!(rowAdder(/^공인\s*외국어/) || rowAdder(/^자격증/) || rowAdder(/^컴퓨터/) || ['award', 'activity', 'training', 'overseas', 'volunteer'].some((kind) => hasBlocks(kind)));
 
   async function fill(session) {
     const basics = !!document.querySelector('[name^="basicInfoGroupAnswers."]');
@@ -1370,8 +1501,12 @@
     if (extras) {
       await fillLanguages(session);
       await fillLicenses(session);
+      await fillSkills(session);
       await fillAwards(session);
+      await fillTrainings(session);
       await fillActivities(session);
+      await fillOverseas(session);
+      await fillVolunteer(session);
     }
     if (!basics && !entries && !extras) {
       session.report.notice('이 단계는 자동 입력할 항목이 없습니다. 자기소개서 등 서술형 문항은 직접 작성해 주세요.');
