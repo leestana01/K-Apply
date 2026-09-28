@@ -152,7 +152,7 @@
       section: SECTION.basic,
       label: '국적',
       value: nationalityCandidates(session.get('basic.nationality')),
-      filled: !/선택해\s*주세요/.test(dom.textOf(trigger)),
+      filled: !pickerEmpty(trigger),
       run: () => controls.fillButtonDropdown(trigger, nationalityCandidates(session.get('basic.nationality'))),
     });
   }
@@ -240,45 +240,65 @@
     const chosen = segmentValue(group);
     if (!/군필|복무/.test(chosen)) return;
 
+    // 입대·제대 날짜: 기업마다 '입대일/제대일', '입대년월/제대년월', '전역일' 등으로 표기한다.
     const dateFields = [
-      ['입대일', 'military.startDate'],
-      ['제대일', 'military.endDate'],
+      [/입대/, '입대일', 'military.startDate'],
+      [/제대|전역/, '제대일', 'military.endDate'],
     ];
-    for (const [placeholder, path] of dateFields) {
-      const input = await dom.waitFor(() => visibleControls(`input[placeholder="${placeholder}"]`).find((element) => !element.disabled), { timeout: 1200 });
+    for (const [pattern, label, path] of dateFields) {
+      const input = await dom.waitFor(
+        () => visibleControls('input[type="text"]').find((element) => !element.disabled && !element.name && pattern.test(element.getAttribute('placeholder') || '')),
+        { timeout: 1200 }
+      );
       const value = text.formatDate(session.get(path), 'YYYY.MM.DD');
       if (!input) {
-        if (value) session.manual(SECTION.military, placeholder, '입력 칸이 활성화되지 않았습니다.');
+        if (value) session.manual(SECTION.military, label, `${label} 칸이 활성화되지 않아 '${value}'을(를) 넣지 못했습니다.`);
         continue;
       }
-      // 입대일·제대일은 월 단위(YYYY.MM) 입력 마스크를 쓰는 기업이 있다.
-      await applyDate(session, { section: SECTION.military, label: placeholder, input, value });
+      // 월 단위(YYYY.MM) 입력 마스크를 쓰는 기업이 있다.
+      await applyDate(session, { section: SECTION.military, label, input, value });
     }
 
-    // 계급 · 제대구분 드롭다운은 선택 후 버튼 문구가 바뀌므로 순서로 찾는다.
-    const dropdowns = inRow(/^병역/, 'button').filter(isDropdown);
-    const plans = [
-      [/계급/, '계급', 'military.rank'],
-      [/제대|전역/, '제대 구분', 'military.discharge'],
+    // 계급·제대구분·군별 드롭다운: 기업마다 켜는 칸과 순서가 다르고, 선택하면 안내 문구가 값으로 바뀐다.
+    // 그래서 안내 문구 또는 현재 값의 종류로 어떤 칸인지 구분한다.
+    const KINDS = [
+      { key: 'rank', label: '계급', path: 'military.rank', placeholder: /계급/, value: /^(이병|일병|상병|병장|하사|중사|상사|원사|준위|소위|중위|대위|소령|중령|대령|준장|소장|중장|대장|훈련병|기타)$/ },
+      { key: 'discharge', label: '제대 구분', path: 'military.discharge', placeholder: /제대|전역|소집/, value: /(만기|의가사|의병|소집해제|불명예|제대|전역|면제)/ },
+      { key: 'branch', label: '군별', path: 'military.branch', placeholder: /군별|군\s*종|복무\s*형태/, value: /(육군|해군|공군|해병|의경|의무경찰|전경|해경|사회복무|공익|병역특례|산업기능|전문연구|카투사|의무소방|상근|기타)/ },
     ];
-    for (let index = 0; index < plans.length; index += 1) {
-      const [placeholder, label, path] = plans[index];
-      const trigger = dropdowns.find((button) => placeholder.test(dom.textOf(button))) || dropdowns[index];
-      const candidates = session.candidates(path);
+    const triggers = inRow(/^병역/, 'button').filter((button) => button.type === 'button' && !isSegment(button) && !/^\d+\s*개월$/.test(dom.textOf(button)));
+    const kindOf = (button) => {
+      const shown = dom.textOf(button);
+      return (
+        KINDS.find((kind) => /선택/.test(shown) && kind.placeholder.test(shown)) ||
+        KINDS.find((kind) => !/선택/.test(shown) && kind.value.test(shown)) ||
+        null
+      );
+    };
+    for (const kind of KINDS) {
+      const trigger = triggers.find((button) => kindOf(button) === kind);
+      const candidates = session.candidates(kind.path);
       if (!trigger) {
-        if (candidates.length) session.manual(SECTION.military, label, '선택 칸을 찾지 못했습니다.');
+        if (candidates.length && kind.key !== 'branch') session.manual(SECTION.military, kind.label, `${kind.label} 선택 칸을 찾지 못해 '${candidates[0]}'을(를) 넣지 못했습니다.`);
         continue;
       }
       await session.apply({
         section: SECTION.military,
-        label,
+        label: kind.label,
         value: candidates,
-        filled: !/선택해\s*주세요/.test(dom.textOf(trigger)),
+        filled: !pickerEmpty(trigger),
         run: async () => {
-          if (trigger.disabled) return { ok: false, reason: '선택 칸이 비활성화되어 있습니다.' };
+          if (trigger.disabled) return { ok: false, reason: `${kind.label} 선택 칸이 비활성화되어 있습니다.` };
           return controls.fillButtonDropdown(trigger, candidates);
         },
       });
+    }
+
+    // 병과(보직): 입력칸
+    const role = visibleControls('input[type="text"]').find((element) => /militaryRole$/.test(element.name || '') || /병과/.test(element.getAttribute('placeholder') || ''));
+    const specialty = session.get('military.specialty');
+    if (role && !text.isBlank(specialty)) {
+      await session.apply({ section: SECTION.military, label: '병과', value: specialty, filled: controls.hasValue(role), run: () => controls.fillText(role, specialty) });
     }
   }
 
@@ -391,6 +411,74 @@
   }
 
 
+  /** 긴급(비상) 연락처: 전화번호 입력칸과 관계 드롭다운 */
+  async function fillEmergency(session) {
+    const phone = document.querySelector('input[name$="emergencyContact.emergencyPhoneNumber"]');
+    if (!phone || !dom.isVisible(phone)) return;
+    const value = session.textValue('basic.phone', phone, session.get('basic.emergencyPhone'));
+    if (text.isBlank(value)) {
+      session.manual(SECTION.basic, '긴급 연락처', '프로필에 긴급 연락처가 없습니다. 옵션 화면의 기본 정보에 입력하면 다음부터 채웁니다.');
+    } else {
+      await session.apply({ section: SECTION.basic, label: '긴급 연락처', value, filled: controls.hasValue(phone), run: () => controls.fillText(phone, value) });
+    }
+    const relation = inRow(/^긴급\s*연락처/, 'button').find((button) => button.type === 'button' && !isSegment(button));
+    const candidates = session.candidates('basic.emergencyRelation');
+    if (!relation) return;
+    if (!candidates.length) {
+      if (/선택/.test(dom.textOf(relation))) session.manual(SECTION.basic, '긴급 연락처 관계', '프로필에 긴급 연락처 관계가 없습니다. 옵션 화면의 기본 정보에 입력해 주세요.');
+      return;
+    }
+    await session.apply({
+      section: SECTION.basic,
+      label: '긴급 연락처 관계',
+      value: candidates,
+      filled: !/선택/.test(dom.textOf(relation)),
+      run: () => controls.fillButtonDropdown(relation, candidates),
+    });
+  }
+
+  /** 지원경로 드롭다운: 프로필의 지원 경로(쉼표로 여러 표현 가능) 중 선택지에 있는 것을 고른다. */
+  async function fillApplySource(session) {
+    const trigger = inRow(/^지원\s*경로/, 'button').find((button) => button.type === 'button' && !isSegment(button));
+    if (!trigger) return;
+    const candidates = session.candidates('application.source');
+    if (!candidates.length) {
+      if (/선택|지원\s*경로/.test(dom.textOf(trigger))) session.manual(SECTION.application, '지원경로', '프로필에 지원 경로가 없습니다. 옵션 화면의 지원 정보에 입력해 주세요.');
+      return;
+    }
+    await session.apply({
+      section: SECTION.application,
+      label: '지원경로',
+      value: candidates,
+      filled: !/선택|^지원\s*경로$/.test(dom.textOf(trigger)),
+      run: () => controls.fillButtonDropdown(trigger, candidates),
+    });
+  }
+
+  /** 주민등록지: 현주소와 같으면 [상동]으로 채운다(프로필 주소는 하나이므로 현주소와 같다고 본다). */
+  async function fillResidentAddress(session) {
+    const field = (key) => document.querySelector(`[name="addressGroupResumeItemAnswers.residentAddress.${key}"]`);
+    const current = (key) => document.querySelector(`[name="addressGroupResumeItemAnswers.currentAddress.${key}"]`);
+    const address = field('address');
+    if (!address || !dom.isVisible(address)) return;
+    const same = inRow(/^주민\s*등록지/, 'button').find((button) => /^상동$/.test(dom.textOf(button)));
+    const currentAddress = current('address');
+    await session.apply({
+      section: SECTION.basic,
+      label: '주민등록지',
+      value: currentAddress && currentAddress.value ? '상동' : session.get('basic.address'),
+      filled: controls.hasValue(address),
+      run: async () => {
+        if (!currentAddress || !controls.hasValue(currentAddress)) return { ok: false, reason: '현주소가 비어 있어 주민등록지를 [상동]으로 채울 수 없습니다. 현주소를 먼저 입력해 주세요.' };
+        if (!same) return { ok: false, reason: '주민등록지의 [상동] 버튼을 찾지 못했습니다. 직접 입력해 주세요.' };
+        same.click();
+        const copied = await dom.waitFor(() => (address.value && address.value === currentAddress.value ? true : null), { timeout: 2000 });
+        if (!copied) return { ok: false, reason: '[상동]을 눌렀지만 주민등록지에 현주소가 복사되지 않았습니다.' };
+        return { ok: true, detail: `상동 — ${address.value}` };
+      },
+    });
+  }
+
   function checkApplySector(session) {
     const trigger = inRow(/^지원\s*분야/, 'button').find(isDropdown);
     if (trigger && /^신입\s*\/\s*경력$/.test(dom.textOf(trigger))) {
@@ -398,9 +486,10 @@
     }
   }
 
-  async function noticeAttachments(session) {
+  async function noticeAttachments(session, handled = new Set()) {
     const inputs = visibleControls('input[type="file"]').filter((input) => !/사진/.test(rowLabel(input)));
     for (const slot of KApply.schema.FILE_SLOTS) {
+      if (handled.has(slot.key)) continue;
       const meta = await session.fileMeta(slot.key);
       if (!meta) continue;
       if (inputs.some((input) => matcher.matchFile(rowLabel(input)) === slot.key)) {
@@ -418,12 +507,16 @@
    * 블록 머리글은 "- 고등학교" 텍스트이고, 머리글에서 조상으로 올라가며 marker 입력칸을 처음 포함하는 요소가 블록이다.
    */
   const BLOCKS = {
-    highschool: { name: '고등학교', marker: 'input[placeholder="입학일"]', title: '고등학교' },
-    college: { name: '대학교', marker: 'input[placeholder="입학일"]', title: '대학교' },
-    graduate: { name: '대학원', marker: 'input[placeholder="입학일"]', title: '대학원' },
-    career: { name: '직장경력', marker: 'input[placeholder="입사일"]', title: '경력' },
+    highschool: { name: '고등학교', marker: 'input[placeholder^="입학"]', title: '고등학교' },
+    college: { name: '대학교', marker: 'input[placeholder^="입학"]', title: '대학교' },
+    graduate: { name: '대학원', marker: 'input[placeholder^="입학"]', title: '대학원' },
+    career: { name: '직장경력', marker: 'input[placeholder^="입사"]', title: '경력' },
+    project: { name: '프로젝트', marker: 'input[name$=".projectName"]', title: '프로젝트' },
     award: { name: '수상경력', marker: 'input[name$=".awardName"]', title: '수상' },
-    activity: { name: '학내외활동', marker: 'input[name^="activityAnswers."][name$=".organization"]', title: '학내외활동' },
+    activity: { name: '학내외활동', marker: 'input[name*="activityAnswers."][name$=".organization"]', title: '학내외활동' },
+    training: { name: '교육이수사항', marker: 'input[name$=".educationName"]', title: '교육 이수' },
+    overseas: { name: '해외경험', marker: 'textarea[name*="overseasExperience"]', title: '해외경험' },
+    volunteer: { name: '봉사활동', marker: 'input[name*="volunteerActivity"][name$=".organization"]', title: '봉사활동' },
   };
 
   const SCHOOL_SEARCH = 'input[placeholder^="학교명을 검색"]';
@@ -513,12 +606,26 @@
 
   async function applySegment(session, { section, label, group, candidates }) {
     if (!group.length || !candidates.length) return;
+    const current = segmentValue(group);
     await session.apply({
       section,
       label,
       value: candidates,
+      // 이미 원하는 값이 선택돼 있으면 건너뛴다(기본 선택이 원하는 값과 같은 경우 포함).
+      filled: !!current && text.pickOption([current], candidates) === 0,
       run: () => controls.fillSegment(group, candidates),
     });
+  }
+
+  /**
+   * 선택 칸이 비어 있는지: 안내 문구가 '…을 선택해주세요', '해외경험 국가선택'처럼 '선택'을 포함하거나,
+   * '해외 경험 목적'처럼 행 제목과 같은 문구이면 아직 고르지 않은 것이다.
+   */
+  function pickerEmpty(trigger) {
+    const shown = dom.textOf(trigger);
+    if (!shown || /선택|^만점\s*기준$|^등급$/.test(shown)) return true;
+    const title = rowLabel(trigger);
+    return !!title && text.normalize(shown) === text.normalize(title);
   }
 
   async function applyDropdown(session, { section, label, trigger, candidates }) {
@@ -527,7 +634,7 @@
       section,
       label,
       value: candidates,
-      filled: !/선택해\s*주세요|^만점기준$/.test(dom.textOf(trigger)),
+      filled: !pickerEmpty(trigger),
       run: async () => {
         const enabled = await dom.waitFor(() => (!trigger.disabled ? trigger : null), { timeout: 1500 });
         if (!enabled) return { ok: false, reason: '선택 칸이 비활성화되어 있습니다.' };
@@ -559,13 +666,14 @@
    * @returns {Promise<Array<{entry:object, block:HTMLElement}>>}
    */
   async function allocate(session, { kind, sourceId, entries, nameOf, identity }) {
-    const section = BLOCKS[kind].title;
     const existing = blocksOf(kind);
     const pending = [];
+    // 같은 이름이 이미 입력된 블록도 비어 있는 칸은 채운다(칸마다 '이미 입력됨'이면 건너뛴다).
+    const filled = [];
     for (const entry of entries) {
       const name = nameOf(entry);
       const same = existing.find((block) => identity(block) && text.normalize(identity(block)).includes(text.normalize(name)));
-      if (same) session.report.add(STATUS.SKIPPED, section, name, '이미 입력됨');
+      if (same) filled.push({ entry, block: same });
       else pending.push(entry);
     }
     const free = existing.filter((block) => !identity(block));
@@ -578,8 +686,9 @@
       free.push(block);
     }
     const capacity = Math.min(free.length, pending.length);
-    session.overflow(section, sourceId, pending.slice(capacity), blocksOf(kind).length);
-    return session.chronological(sourceId, pending.slice(0, capacity)).map((entry, index) => ({ entry, block: free[index] }));
+    session.overflow(BLOCKS[kind].title, sourceId, pending.slice(capacity), blocksOf(kind).length);
+    const placed = session.chronological(sourceId, pending.slice(0, capacity)).map((entry, index) => ({ entry, block: free[index] }));
+    return [...filled, ...placed];
   }
 
   const DEGREE = { university: ['학사'], college: ['전문학사'], master: ['석사'], doctor: ['박사', '석박사통합'] };
@@ -609,12 +718,24 @@
     });
     if (status === STATUS.FAILED) return;
 
-    await applyDropdown(session, {
-      section,
-      label: '소재지',
-      trigger: pickerIn(/^학교\s*정보/, block),
-      candidates: regionCandidates(entry.region),
-    });
+    // 학교정보 행의 선택 칸(소재지, 고등학교 계열 등)은 안내 문구 또는 현재 값으로 구분한다.
+    const infoRow = rowIn(block, /^학교\s*정보/);
+    const infoPickers = infoRow
+      ? visibleControls('button', infoRow).filter((button) => button.type === 'button' && !isSegment(button) && !button.closest('ul'))
+      : [];
+    const REGION = /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|해외|미국|일본|중국|기타.*|.*특별시|.*광역시|.*도)$/;
+    const regionPicker = infoPickers.find((button) => /소재지/.test(dom.textOf(button)) || REGION.test(dom.textOf(button)));
+    const trackPicker = infoPickers.find((button) => button !== regionPicker && (/계열/.test(dom.textOf(button)) || !/선택/.test(dom.textOf(button))));
+    await applyDropdown(session, { section, label: '소재지', trigger: regionPicker, candidates: regionCandidates(entry.region) });
+    if (trackPicker) {
+      const track = String(entry.track || '').trim();
+      if (!track) {
+        if (/선택/.test(dom.textOf(trackPicker))) session.manual(section, '계열', `프로필에 '${entry.school}'의 계열이 없습니다. 옵션 화면의 학력에 입력해 주세요.`);
+      } else {
+        // '인문계'처럼 끝에 '계'를 붙여 적어도 선택지 '인문'과 맞춘다.
+        await applyDropdown(session, { section, label: '계열', trigger: trackPicker, candidates: [...new Set([track, track.replace(/계$/, '')])] });
+      }
+    }
     if (entry.campusType) {
       await applySegment(session, {
         section,
@@ -627,8 +748,8 @@
       await applySegment(session, { section, label: '주간 / 야간', group: segmentIn(block, /^학교\s*정보/, /주간|야간/), candidates: [entry.dayNight] });
     }
 
-    await applyDate(session, { section, label: '입학일', input: block.querySelector('input[placeholder="입학일"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
-    await applyDate(session, { section, label: '졸업일', input: block.querySelector('input[placeholder="졸업일"]'), value: endDate(entry.endDate) });
+    await applyDate(session, { section, label: '입학일', input: block.querySelector('input[placeholder^="입학"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '졸업일', input: block.querySelector('input[placeholder^="졸업"]'), value: endDate(entry.endDate) });
     await applySegment(session, { section, label: '졸업 구분', group: segmentIn(block, /^졸업\s*구분/), candidates: STATUS_CANDIDATES[entry.status] || (entry.status ? [entry.status] : []) });
     if (entry.entryType) {
       await applySegment(session, { section, label: '입학 구분', group: segmentIn(block, /^입학\s*구분/), candidates: [entry.entryType] });
@@ -744,9 +865,9 @@
 
       await applyDropdown(session, { section, label: '고용 형태', trigger: pickerIn(/^고용\s*형태/, block), candidates: entry.employmentType ? [entry.employmentType] : [] });
       await applySegment(session, { section, label: '재직 여부', group: segmentIn(block, /^근무\s*기간/), candidates: [entry.current ? '재직중' : '퇴사'] });
-      await applyDate(session, { section, label: '입사일', input: block.querySelector('input[placeholder="입사일"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '입사일', input: block.querySelector('input[placeholder^="입사"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       if (!entry.current) {
-        await applyDate(session, { section, label: '퇴사일', input: block.querySelector('input[placeholder="퇴사일"]'), value: endDate(entry.endDate) });
+        await applyDate(session, { section, label: '퇴사일', input: block.querySelector('input[placeholder^="퇴사"]'), value: endDate(entry.endDate) });
       }
 
       const search = block.querySelector(COMPANY_SEARCH);
@@ -766,7 +887,108 @@
     }
   }
 
-  const hasEntrySections = () => ['highschool', 'college', 'graduate', 'career'].some((kind) => adderOf(kind) || blocksOf(kind).length);
+  // ---------------------------------------------------------------------------
+  // 프로젝트 · 포트폴리오 (기업에 따라 학력 및 연구/경력 단계에 있음)
+  // ---------------------------------------------------------------------------
+
+  /** 입력칸의 최대 글자 수: maxlength 속성 또는 옆의 '0/500' 표시 */
+  function maxLengthOf(element) {
+    const attribute = Number(element.getAttribute('maxlength'));
+    if (attribute > 0) return attribute;
+    let node = element.parentElement;
+    for (let depth = 0; depth < 3 && node; depth += 1) {
+      const counter = [...node.querySelectorAll('p, span')].map(dom.textOf).find((value) => /^\d+\s*\/\s*\d+$/.test(value));
+      if (counter) return Number(counter.split('/')[1]);
+      node = node.parentElement;
+    }
+    return 0;
+  }
+
+  /** 글자 수 제한이 있는 서술 칸: 넘으면 잘라 넣지 않고 알린다. */
+  async function applyLongText(session, { section, label, input, value }) {
+    if (!input || text.isBlank(value)) return;
+    const limit = maxLengthOf(input);
+    const content = String(value).trim();
+    if (limit && content.length > limit) {
+      session.manual(section, label, `프로필 내용이 ${content.length}자로 이 칸의 제한(${limit}자)을 넘어 넣지 않았습니다. ${limit}자 이내로 줄여 직접 입력해 주세요.`);
+      return;
+    }
+    await applyText(session, { section, label, input, value: content });
+  }
+
+  async function fillProjects(session) {
+    if (!adderOf('project') && !blocksOf('project').length) return;
+    const pairs = await allocate(session, {
+      kind: 'project',
+      sourceId: 'projects',
+      entries: session.list('projects').filter((entry) => !text.isBlank(entry.name)),
+      nameOf: (entry) => entry.name,
+      identity: inputIdentity('input[name$=".projectName"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const section = `프로젝트 · ${entry.name}`;
+      await applyText(session, { section, label: '프로젝트명', input: block.querySelector('input[name$=".projectName"]'), value: entry.name });
+      const workplace = block.querySelector('input[name$=".workplace"], input[name$=".clientName"]');
+      if (workplace && text.isBlank(entry.organization)) {
+        session.manual(section, rowLabel(workplace) || '근무처', `프로필에 '${entry.name}'의 소속/발주처가 없습니다. 옵션 화면의 프로젝트에 입력해 주세요.`);
+      } else {
+        await applyText(session, { section, label: rowLabel(workplace) || '근무처', input: workplace, value: entry.organization });
+      }
+      const period = visibleControls('input[placeholder="기간"], input[placeholder$="기간"]', block);
+      await applyDate(session, { section, label: '시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      if (!text.isBlank(entry.endDate)) await applyDate(session, { section, label: '종료', input: period[1], value: endDate(entry.endDate) });
+      await applyText(session, { section, label: '참여 역할', input: block.querySelector('input[name$=".role"]'), value: entry.role });
+      await applyText(session, { section, label: '기여도', input: block.querySelector('input[name$=".contributionRate"]'), value: entry.contribution });
+      await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".performWork"], textarea[name$=".description"]'), value: entry.description });
+    }
+  }
+
+  const portfolioUrls = () => visibleControls('input[name*="portfolioFile"]').filter((input) => /\.url$/.test(input.name));
+
+  /**
+   * 포트폴리오 행: [첨부파일 추가] + URL 입력칸. 옵션에 포트폴리오 파일이 있으면 첨부하고 서버 수신까지 검증,
+   * 없으면 포트폴리오 링크를 넣는다.
+   * @returns {Promise<boolean>} 포트폴리오 파일을 이 칸에서 다뤘는지
+   */
+  async function fillPortfolio(session) {
+    const adder = rowAdder(/^포트폴리오/);
+    if (!adder && !portfolioUrls().length) return false;
+    const meta = await session.fileMeta('portfolio');
+    const link = String(session.get('links.portfolio') || '').trim();
+    if (!meta && !link) return false;
+    if (portfolioUrls().some((input) => controls.hasValue(input))) {
+      session.report.add(STATUS.SKIPPED, '포트폴리오', '포트폴리오', '이미 입력됨');
+      return !!meta;
+    }
+    let url = portfolioUrls().find((input) => !controls.hasValue(input));
+    if (!url && adder) {
+      adder.click();
+      url = await dom.waitFor(() => portfolioUrls().find((input) => !controls.hasValue(input)) || null, { timeout: 1500 });
+    }
+    if (!url) {
+      session.manual('포트폴리오', '포트폴리오', '포트폴리오 행을 추가하지 못했습니다. 직접 첨부하거나 URL을 입력해 주세요.');
+      return !!meta;
+    }
+    let row = url.parentElement;
+    while (row && row !== document.body && !row.querySelector('input[type="file"]')) row = row.parentElement;
+    const file = row && row !== document.body ? row.querySelector('input[type="file"]') : null;
+    if (meta && file) {
+      await session.applyFile({
+        section: '포트폴리오',
+        label: '포트폴리오 파일',
+        slot: 'portfolio',
+        input: file,
+        confirm: (record) => (controls.hasValue(url) || text.normalize(dom.textOf(row)).includes(text.normalize(record.name)) ? true : `'${record.name}'을(를) 올렸지만 첨부 목록에 표시되지 않았습니다.`),
+      });
+      return true;
+    }
+    if (link) {
+      await session.apply({ section: '포트폴리오', label: '포트폴리오 URL', value: link, run: () => controls.fillText(url, link) });
+    }
+    return !!meta && !file;
+  }
+
+  const hasEntrySections = () => ['highschool', 'college', 'graduate', 'career', 'project'].some((kind) => adderOf(kind) || blocksOf(kind).length);
 
   // ---------------------------------------------------------------------------
   // 3단계: 어학 · 자격 · 경험
@@ -898,9 +1120,9 @@
   async function fillExamFields(session, section, register, entry) {
     const index = register.name.slice(EXAM_PREFIX.length).split('.')[0];
     const field = (key) => document.querySelector(`input[name="${EXAM_PREFIX}${index}.${key}"]`);
-    const box = rowOfSearch(register, 'input[placeholder="응시일"]');
+    const box = rowOfSearch(register, 'input[placeholder^="응시"]');
     await applyText(session, { section, label: '등록 번호', input: register, value: entry.number });
-    await applyDate(session, { section, label: '응시일', input: box && box.querySelector('input[placeholder="응시일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '응시일', input: box && box.querySelector('input[placeholder^="응시"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
     const score = field('examScore.score');
     if (score) {
       await applyText(session, { section, label: '점수', input: score, value: entry.score });
@@ -976,9 +1198,9 @@
 
   async function fillLicenseFields(session, section, organization, entry) {
     const index = organization.name.slice(LICENSE_PREFIX.length).split('.')[0];
-    const box = rowOfSearch(organization, 'input[placeholder="취득일"]');
+    const box = rowOfSearch(organization, 'input[placeholder^="취득"]');
     await applyText(session, { section, label: '발행 기관', input: organization, value: entry.issuer });
-    await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder="취득일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+    await applyDate(session, { section, label: '취득일', input: box && box.querySelector('input[placeholder^="취득"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
     const register = document.querySelector(`input[name="${LICENSE_PREFIX}${index}.registNumber"]`);
     if (!register && !text.isBlank(entry.number)) {
       session.manual(section, '자격 번호', `이 행에는 자격 번호 칸이 없어(목록에 없는 자격증을 직접 등록한 경우) '${entry.number}'을(를) 넣지 못했습니다. 목록에서 자격증을 다시 골라 주세요.`);
@@ -1042,9 +1264,39 @@
       const section = `수상 · ${entry.name}`;
       await applyText(session, { section, label: '상훈명', input: block.querySelector('input[name$=".awardName"]'), value: entry.name });
       await applyText(session, { section, label: '수여 기관', input: block.querySelector('input[name$=".organization"]'), value: entry.issuer });
-      await applyDate(session, { section, label: '수상일', input: block.querySelector('input[placeholder="발급일"], input[placeholder="수상일"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '수상일', input: block.querySelector('input[placeholder^="발급"], input[placeholder^="수상"]'), value: text.formatDate(entry.date, 'YYYY.MM.DD') });
       await applyText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".comment"]'), value: entry.description });
     }
+  }
+
+  const hasBlocks = (kind) => !!(adderOf(kind) || blocksOf(kind).length);
+
+  /** 활동 구분별로 넣을 블록: 봉사활동·해외경험 블록이 따로 있으면 그쪽, 없으면 학내외활동 */
+  function activityKind(entry) {
+    if (entry.type === '봉사활동' && hasBlocks('volunteer')) return 'volunteer';
+    if (entry.type === '해외경험' && hasBlocks('overseas')) return 'overseas';
+    return 'activity';
+  }
+
+  const joinContents = (entry) => [entry.organization && entry.name && entry.name !== entry.organization ? entry.name : '', entry.description].filter(Boolean).join(' - ');
+
+  /** 필수 선택 칸인데 프로필에 값이 없으면 항목 이름과 함께 알린다. */
+  const DOMESTIC = /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|국내|한국|대한민국)/;
+
+  /** 지역·국가 후보: 국내 지역이면 국가 목록만 있는 선택지를 위해 '대한민국'도 후보에 넣는다. */
+  function locationCandidates(value) {
+    const shown = String(value || '').trim();
+    if (!shown) return [];
+    return DOMESTIC.test(shown) ? [...new Set([shown, shown.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, ''), '대한민국', '한국', '국내'])] : [shown];
+  }
+
+  async function applyRequiredDropdown(session, { section, label, trigger, value, hint, candidates = null }) {
+    if (!trigger) return;
+    if (text.isBlank(value)) {
+      if (pickerEmpty(trigger)) session.manual(section, label, `프로필에 ${hint}이(가) 없습니다. 옵션 화면에서 입력하거나 직접 선택해 주세요.`);
+      return;
+    }
+    await applyDropdown(session, { section, label, trigger, candidates: candidates || [String(value).trim()] });
   }
 
   async function fillActivities(session) {
@@ -1053,7 +1305,7 @@
     const pairs = await allocate(session, {
       kind: 'activity',
       sourceId: 'activities',
-      entries: session.list('activities').filter((entry) => !text.isBlank(orName(entry))),
+      entries: session.list('activities').filter((entry) => !text.isBlank(orName(entry)) && activityKind(entry) === 'activity'),
       nameOf: orName,
       identity: inputIdentity('input[name$=".organization"]'),
     });
@@ -1062,7 +1314,7 @@
       const section = `학내외활동 · ${name}`;
       await applyDropdown(session, { section, label: '활동 구분', trigger: pickerIn(/^활동\s*구분/, block), candidates: text.candidatesFor('activityType', entry.type) });
       await applyText(session, { section, label: '기관 및 조직명', input: block.querySelector('input[name$=".organization"]'), value: name });
-      const period = visibleControls('input[placeholder="활동기간"]', block);
+      const period = visibleControls('input[placeholder$="기간"]', block);
       await applyDate(session, { section, label: '활동 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       await applyDate(session, { section, label: '활동 종료', input: period[1], value: endDate(entry.endDate) });
       await applyText(session, { section, label: '역할', input: block.querySelector('input[name$=".role"]'), value: entry.role });
@@ -1091,9 +1343,14 @@
    * 칸에서 가까운 조상부터 올라가며 컨트롤이 없는 첫 텍스트 요소를 찾는다.
    */
   function itemName(element) {
+    for (const kind of Object.keys(BLOCKS)) {
+      if (blocksOf(kind).some((block) => block.contains(element))) return BLOCKS[kind].name;
+    }
     let node = element.parentElement;
     for (let depth = 0; depth < 7 && node && node !== document.body; depth += 1) {
-      const title = [...node.querySelectorAll('p')].find((candidate) => !candidate.querySelector(CONTROL) && dom.textOf(candidate) && dom.textOf(candidate).length < 40 && dom.textOf(candidate) !== '/');
+      const title = [...node.querySelectorAll('p')].find(
+        (candidate) => !candidate.closest('button') && !candidate.querySelector(CONTROL) && dom.textOf(candidate) && dom.textOf(candidate).length < 40 && dom.textOf(candidate) !== '/'
+      );
       if (title) return dom.textOf(title).replace(/^-\s*/, '');
       node = node.parentElement;
     }
@@ -1116,7 +1373,7 @@
       (element) => !element.disabled && !element.readOnly && !controls.hasValue(element) && markedRequired(element)
     );
     const pickers = visibleControls('button').filter(
-      (button) => button.type === 'button' && !button.disabled && /선택해\s*주세요|^선택$/.test(dom.textOf(button)) && markedRequired(button)
+      (button) => button.type === 'button' && !button.disabled && !isSegment(button) && !button.closest('ul') && !/추가하기|첨부/.test(dom.textOf(button)) && pickerEmpty(button) && markedRequired(button)
     );
     const names = [...new Set([...empty, ...pickers].map(fieldName))];
     if (!names.length) return;
@@ -1127,7 +1384,165 @@
     );
   }
 
-  const hasStep3Sections = () => !!(rowAdder(/^공인\s*외국어/) || rowAdder(/^자격증/) || adderOf('award') || adderOf('activity') || blocksOf('award').length || blocksOf('activity').length);
+  async function fillVolunteer(session) {
+    if (!hasBlocks('volunteer')) return;
+    const orName = (entry) => entry.organization || entry.name;
+    const pairs = await allocate(session, {
+      kind: 'volunteer',
+      sourceId: 'activities',
+      entries: session.list('activities').filter((entry) => entry.type === '봉사활동' && !text.isBlank(orName(entry))),
+      nameOf: orName,
+      identity: inputIdentity('input[name*="volunteerActivity"][name$=".organization"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const name = orName(entry);
+      const section = `봉사활동 · ${name}`;
+      await applyRequiredDropdown(session, { section, label: '봉사 구분', trigger: pickerIn(/^봉사\s*구분/, block), value: entry.detailType, hint: `'${name}'의 봉사 분야(세부 구분)` });
+      await applyText(session, { section, label: '주관 기관', input: block.querySelector('input[name$=".organization"]'), value: name });
+      const period = visibleControls('input[placeholder$="기간"]', block);
+      await applyDate(session, { section, label: '활동 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '활동 종료', input: period[1], value: endDate(entry.endDate) });
+      await applyText(session, { section, label: '봉사 시간', input: block.querySelector('input[name$=".time"]'), value: text.digitsOnly(entry.hours || '') });
+      await applyRequiredDropdown(session, { section, label: '봉사 지역', trigger: pickerIn(/^봉사\s*지역/, block), value: entry.location, hint: `'${name}'의 봉사 지역`, candidates: locationCandidates(entry.location) });
+      await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".comment"]'), value: joinContents(entry) });
+    }
+  }
+
+  async function fillOverseas(session) {
+    if (!hasBlocks('overseas')) return;
+    const pairs = await allocate(session, {
+      kind: 'overseas',
+      sourceId: 'activities',
+      entries: session.list('activities').filter((entry) => entry.type === '해외경험' && !text.isBlank(entry.name || entry.location)),
+      nameOf: (entry) => entry.name || entry.location,
+      // 해외경험은 이름 칸이 없어 상세 내용으로 같은 항목인지 판단한다.
+      identity: inputIdentity('textarea[name*="overseasExperience"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const name = entry.name || entry.location;
+      const section = `해외경험 · ${name}`;
+      await applyRequiredDropdown(session, { section, label: '해외경험 목적', trigger: pickerIn(/^해외\s*경험\s*목적/, block), value: entry.detailType, hint: `'${name}'의 해외경험 목적(세부 구분)` });
+      await applyRequiredDropdown(session, { section, label: '국가', trigger: pickerIn(/^국가/, block), value: entry.location, hint: `'${name}'의 국가`, candidates: locationCandidates(entry.location) });
+      await applyDate(session, { section, label: '출국', input: block.querySelector('input[placeholder^="출국"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '입국', input: block.querySelector('input[placeholder^="입국"]'), value: endDate(entry.endDate) });
+      await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name*="overseasExperience"]'), value: [entry.name, entry.description].filter(Boolean).join(' - ') });
+    }
+  }
+
+  async function fillTrainings(session) {
+    if (!hasBlocks('training')) return;
+    const pairs = await allocate(session, {
+      kind: 'training',
+      sourceId: 'trainings',
+      entries: session.list('trainings').filter((entry) => !text.isBlank(entry.course)),
+      nameOf: (entry) => entry.course,
+      identity: inputIdentity('input[name$=".educationName"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const section = `교육 이수 · ${entry.course}`;
+      await applyText(session, { section, label: '교육명', input: block.querySelector('input[name$=".educationName"]'), value: entry.course });
+      await applyText(session, { section, label: '교육 기관', input: block.querySelector('input[name$=".organization"]'), value: entry.institution });
+      const period = visibleControls('input[placeholder$="기간"]', block);
+      await applyDate(session, { section, label: '이수 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      await applyDate(session, { section, label: '이수 종료', input: period[1], value: endDate(entry.endDate) });
+      await applyText(session, { section, label: '교육 시간', input: block.querySelector('input[name$=".time"]'), value: text.digitsOnly(entry.hours || '') });
+      await applyLongText(session, { section, label: '교육 과정', input: block.querySelector('textarea[name$=".comment"]'), value: entry.description });
+    }
+  }
+
+  /** 컴퓨터활용능력: [추가하기]로 행을 만들고 활용구분 드롭다운과 프로그램명을 채운다. */
+  async function fillSkills(session) {
+    const pattern = /^컴퓨터/;
+    const adder = rowAdder(pattern);
+    const names = () => visibleControls('input[name$=".softwareName"]');
+    if (!adder && !names().length) return;
+    const entries = session.list('skills').filter((entry) => !text.isBlank(entry.name));
+    if (!entries.length) {
+      let row = adder && adder.parentElement;
+      while (row && row !== document.body && !pattern.test(text.cleanLabel(dom.textOf(row)))) row = row.parentElement;
+      const required = row && row !== document.body && /\*/.test(dom.textOf(row).slice(0, 20));
+      if (!names().some((input) => controls.hasValue(input)) && required) {
+        session.manual('컴퓨터 활용 능력', '컴퓨터활용능력', '이 지원서의 필수 항목인데 프로필에 컴퓨터 활용 능력이 없습니다. 옵션 화면의 "컴퓨터 활용 능력"에 추가해 주세요.');
+      }
+      return;
+    }
+    for (const [position, entry] of entries.entries()) {
+      const section = `컴퓨터 활용 능력 · ${entry.name}`;
+      // 이미 입력된 프로그램도 비어 있는 활용구분·수준·사용기간은 채운다.
+      let input = names().find((element) => text.normalize(element.value) === text.normalize(entry.name)) || names().find((element) => !controls.hasValue(element));
+      if (!input) {
+        const before = names();
+        const added = await addSearchRow(pattern, 'input[name$=".softwareName"]', before.length);
+        input = added || null;
+      }
+      if (!input) {
+        session.overflow('컴퓨터 활용 능력', 'skills', entries.slice(position), names().length);
+        break;
+      }
+      let row = input.parentElement;
+      while (row && row !== document.body && !visibleControls('button', row).some((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button)))) row = row.parentElement;
+      const trigger = row && row !== document.body ? visibleControls('button', row).find((button) => button.type === 'button' && !/추가하기/.test(dom.textOf(button))) : null;
+      await applyRequiredDropdown(session, { section, label: '활용 구분', trigger, value: entry.category, hint: `'${entry.name}'의 활용 구분` });
+      await applyText(session, { section, label: '프로그램명', input, value: entry.name });
+      // 활용구분·프로그램명을 넣어야 수준 버튼과 사용기간 선택이 나타난다. 이 칸들은 활용구분이 있는
+      // 영역보다 바깥에 생기므로, 이 행(프로그램명 칸이 하나뿐인 조상)에서 다시 찾는다.
+      const detailRow = await dom.waitFor(() => {
+        let node = input.parentElement;
+        for (let depth = 0; depth < 8 && node && node !== document.body; depth += 1) {
+          if (node.querySelectorAll('input[name$=".softwareName"]').length > 1) return null;
+          if (node.querySelector('button[data-value]') || [...node.querySelectorAll('button')].some((button) => /사용\s*기간/.test(dom.textOf(button)))) return node;
+          node = node.parentElement;
+        }
+        return null;
+      }, { timeout: 1500 });
+      if (detailRow) await fillSkillDetails(session, section, detailRow, entry);
+      else if (!text.isBlank(entry.level) || !text.isBlank(entry.years)) session.manual(section, '활용 수준 · 사용 기간', `'${entry.name}'의 수준·사용기간 칸이 나타나지 않았습니다. 직접 선택해 주세요.`);
+    }
+  }
+
+  /**
+   * 수준 버튼: div > button[data-value] 묶음, 선택된 버튼만 배경색이 다르다(기본 선택 '입문').
+   * 사용기간: '사용기간 선택' 드롭다운(1년 … 10년이상).
+   */
+  async function fillSkillDetails(session, section, row, entry) {
+    const chips = visibleControls('button[data-value]', row);
+    if (chips.length && !text.isBlank(entry.level)) {
+      // 선택된 버튼: 대부분의 버튼과 배경색이 다른 하나
+      const selected = () => {
+        const counts = new Map();
+        chips.forEach((chip) => {
+          const color = getComputedStyle(chip).backgroundColor;
+          counts.set(color, (counts.get(color) || 0) + 1);
+        });
+        const common = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        return chips.find((chip) => getComputedStyle(chip).backgroundColor !== common) || null;
+      };
+      const candidates = text.candidatesFor('skillLevel', entry.level);
+      const index = text.pickOption(chips.map(dom.textOf), candidates);
+      await session.apply({
+        section,
+        label: '활용 수준',
+        value: candidates,
+        filled: index >= 0 && selected() === chips[index],
+        run: async () => {
+          if (index < 0) return { ok: false, reason: `수준 선택지(${chips.map(dom.textOf).join(', ')})에 '${entry.level}'에 해당하는 항목이 없습니다.` };
+          chips[index].click();
+          await dom.sleep(250);
+          return selected() === chips[index] || { ok: false, reason: `'${dom.textOf(chips[index])}'을(를) 눌렀지만 선택되지 않았습니다.` };
+        },
+      });
+    }
+    const period = visibleControls('button', row).find((button) => /사용\s*기간/.test(dom.textOf(button)) || /^\d+\s*년(이상)?$/.test(dom.textOf(button)));
+    const years = text.digitsOnly(entry.years || '');
+    if (period && years) {
+      const count = Number(years);
+      const candidates = count >= 10 ? [`${count}년`, '10년이상', '10년 이상'] : [`${count}년`];
+      await applyDropdown(session, { section, label: '사용 기간', trigger: period, candidates });
+    }
+  }
+
+  const hasStep3Sections = () =>
+    !!(rowAdder(/^공인\s*외국어/) || rowAdder(/^자격증/) || rowAdder(/^컴퓨터/) || ['award', 'activity', 'training', 'overseas', 'volunteer'].some((kind) => hasBlocks(kind)));
 
   async function fill(session) {
     const basics = !!document.querySelector('[name^="basicInfoGroupAnswers."]');
@@ -1140,24 +1555,34 @@
       await fillMilitary(session);
       await fillPreferential(session);
       await fillAddress(session);
+      await fillResidentAddress(session);
+      await fillEmergency(session);
+      await fillApplySource(session);
       await fillLinks(session);
       await fillNationality(session);
     }
+    const handledFiles = new Set();
     if (entries) {
       await fillEducations(session);
       await fillCareers(session);
+      await fillProjects(session);
     }
+    if (await fillPortfolio(session)) handledFiles.add('portfolio');
     const extras = hasStep3Sections();
     if (extras) {
       await fillLanguages(session);
       await fillLicenses(session);
+      await fillSkills(session);
       await fillAwards(session);
+      await fillTrainings(session);
       await fillActivities(session);
+      await fillOverseas(session);
+      await fillVolunteer(session);
     }
     if (!basics && !entries && !extras) {
       session.report.notice('이 단계는 자동 입력할 항목이 없습니다. 자기소개서 등 서술형 문항은 직접 작성해 주세요.');
     }
-    await noticeAttachments(session);
+    await noticeAttachments(session, handledFiles);
     reportEmptyRequired(session);
     session.report.notice('단계를 이동하면 저장됩니다. 입력 결과를 확인한 뒤 [임시저장] 또는 [다음]을 직접 눌러 주세요.');
   }
