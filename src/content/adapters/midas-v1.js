@@ -486,9 +486,10 @@
     }
   }
 
-  async function noticeAttachments(session) {
+  async function noticeAttachments(session, handled = new Set()) {
     const inputs = visibleControls('input[type="file"]').filter((input) => !/사진/.test(rowLabel(input)));
     for (const slot of KApply.schema.FILE_SLOTS) {
+      if (handled.has(slot.key)) continue;
       const meta = await session.fileMeta(slot.key);
       if (!meta) continue;
       if (inputs.some((input) => matcher.matchFile(rowLabel(input)) === slot.key)) {
@@ -510,6 +511,7 @@
     college: { name: '대학교', marker: 'input[placeholder="입학일"]', title: '대학교' },
     graduate: { name: '대학원', marker: 'input[placeholder="입학일"]', title: '대학원' },
     career: { name: '직장경력', marker: 'input[placeholder="입사일"]', title: '경력' },
+    project: { name: '프로젝트', marker: 'input[name$=".projectName"]', title: '프로젝트' },
     award: { name: '수상경력', marker: 'input[name$=".awardName"]', title: '수상' },
     activity: { name: '학내외활동', marker: 'input[name^="activityAnswers."][name$=".organization"]', title: '학내외활동' },
   };
@@ -854,7 +856,108 @@
     }
   }
 
-  const hasEntrySections = () => ['highschool', 'college', 'graduate', 'career'].some((kind) => adderOf(kind) || blocksOf(kind).length);
+  // ---------------------------------------------------------------------------
+  // 프로젝트 · 포트폴리오 (기업에 따라 학력 및 연구/경력 단계에 있음)
+  // ---------------------------------------------------------------------------
+
+  /** 입력칸의 최대 글자 수: maxlength 속성 또는 옆의 '0/500' 표시 */
+  function maxLengthOf(element) {
+    const attribute = Number(element.getAttribute('maxlength'));
+    if (attribute > 0) return attribute;
+    let node = element.parentElement;
+    for (let depth = 0; depth < 3 && node; depth += 1) {
+      const counter = [...node.querySelectorAll('p, span')].map(dom.textOf).find((value) => /^\d+\s*\/\s*\d+$/.test(value));
+      if (counter) return Number(counter.split('/')[1]);
+      node = node.parentElement;
+    }
+    return 0;
+  }
+
+  /** 글자 수 제한이 있는 서술 칸: 넘으면 잘라 넣지 않고 알린다. */
+  async function applyLongText(session, { section, label, input, value }) {
+    if (!input || text.isBlank(value)) return;
+    const limit = maxLengthOf(input);
+    const content = String(value).trim();
+    if (limit && content.length > limit) {
+      session.manual(section, label, `프로필 내용이 ${content.length}자로 이 칸의 제한(${limit}자)을 넘어 넣지 않았습니다. ${limit}자 이내로 줄여 직접 입력해 주세요.`);
+      return;
+    }
+    await applyText(session, { section, label, input, value: content });
+  }
+
+  async function fillProjects(session) {
+    if (!adderOf('project') && !blocksOf('project').length) return;
+    const pairs = await allocate(session, {
+      kind: 'project',
+      sourceId: 'projects',
+      entries: session.list('projects').filter((entry) => !text.isBlank(entry.name)),
+      nameOf: (entry) => entry.name,
+      identity: inputIdentity('input[name$=".projectName"]'),
+    });
+    for (const { entry, block } of pairs) {
+      const section = `프로젝트 · ${entry.name}`;
+      await applyText(session, { section, label: '프로젝트명', input: block.querySelector('input[name$=".projectName"]'), value: entry.name });
+      const workplace = block.querySelector('input[name$=".workplace"], input[name$=".clientName"]');
+      if (workplace && text.isBlank(entry.organization)) {
+        session.manual(section, rowLabel(workplace) || '근무처', `프로필에 '${entry.name}'의 소속/발주처가 없습니다. 옵션 화면의 프로젝트에 입력해 주세요.`);
+      } else {
+        await applyText(session, { section, label: rowLabel(workplace) || '근무처', input: workplace, value: entry.organization });
+      }
+      const period = visibleControls('input[placeholder="기간"], input[placeholder="프로젝트 기간"]', block);
+      await applyDate(session, { section, label: '시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
+      if (!text.isBlank(entry.endDate)) await applyDate(session, { section, label: '종료', input: period[1], value: endDate(entry.endDate) });
+      await applyText(session, { section, label: '참여 역할', input: block.querySelector('input[name$=".role"]'), value: entry.role });
+      await applyText(session, { section, label: '기여도', input: block.querySelector('input[name$=".contributionRate"]'), value: entry.contribution });
+      await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".performWork"], textarea[name$=".description"]'), value: entry.description });
+    }
+  }
+
+  const portfolioUrls = () => visibleControls('input[name*="portfolioFile."]').filter((input) => /\.url$/.test(input.name));
+
+  /**
+   * 포트폴리오 행: [첨부파일 추가] + URL 입력칸. 옵션에 포트폴리오 파일이 있으면 첨부하고 서버 수신까지 검증,
+   * 없으면 포트폴리오 링크를 넣는다.
+   * @returns {Promise<boolean>} 포트폴리오 파일을 이 칸에서 다뤘는지
+   */
+  async function fillPortfolio(session) {
+    const adder = rowAdder(/^포트폴리오/);
+    if (!adder && !portfolioUrls().length) return false;
+    const meta = await session.fileMeta('portfolio');
+    const link = String(session.get('links.portfolio') || '').trim();
+    if (!meta && !link) return false;
+    if (portfolioUrls().some((input) => controls.hasValue(input))) {
+      session.report.add(STATUS.SKIPPED, '포트폴리오', '포트폴리오', '이미 입력됨');
+      return !!meta;
+    }
+    let url = portfolioUrls().find((input) => !controls.hasValue(input));
+    if (!url && adder) {
+      adder.click();
+      url = await dom.waitFor(() => portfolioUrls().find((input) => !controls.hasValue(input)) || null, { timeout: 1500 });
+    }
+    if (!url) {
+      session.manual('포트폴리오', '포트폴리오', '포트폴리오 행을 추가하지 못했습니다. 직접 첨부하거나 URL을 입력해 주세요.');
+      return !!meta;
+    }
+    let row = url.parentElement;
+    while (row && row !== document.body && !row.querySelector('input[type="file"]')) row = row.parentElement;
+    const file = row && row !== document.body ? row.querySelector('input[type="file"]') : null;
+    if (meta && file) {
+      await session.applyFile({
+        section: '포트폴리오',
+        label: '포트폴리오 파일',
+        slot: 'portfolio',
+        input: file,
+        confirm: (record) => (controls.hasValue(url) || text.normalize(dom.textOf(row)).includes(text.normalize(record.name)) ? true : `'${record.name}'을(를) 올렸지만 첨부 목록에 표시되지 않았습니다.`),
+      });
+      return true;
+    }
+    if (link) {
+      await session.apply({ section: '포트폴리오', label: '포트폴리오 URL', value: link, run: () => controls.fillText(url, link) });
+    }
+    return !!meta && !file;
+  }
+
+  const hasEntrySections = () => ['highschool', 'college', 'graduate', 'career', 'project'].some((kind) => adderOf(kind) || blocksOf(kind).length);
 
   // ---------------------------------------------------------------------------
   // 3단계: 어학 · 자격 · 경험
@@ -1234,10 +1337,13 @@
       await fillLinks(session);
       await fillNationality(session);
     }
+    const handledFiles = new Set();
     if (entries) {
       await fillEducations(session);
       await fillCareers(session);
+      await fillProjects(session);
     }
+    if (await fillPortfolio(session)) handledFiles.add('portfolio');
     const extras = hasStep3Sections();
     if (extras) {
       await fillLanguages(session);
@@ -1248,7 +1354,7 @@
     if (!basics && !entries && !extras) {
       session.report.notice('이 단계는 자동 입력할 항목이 없습니다. 자기소개서 등 서술형 문항은 직접 작성해 주세요.');
     }
-    await noticeAttachments(session);
+    await noticeAttachments(session, handledFiles);
     reportEmptyRequired(session);
     session.report.notice('단계를 이동하면 저장됩니다. 입력 결과를 확인한 뒤 [임시저장] 또는 [다음]을 직접 눌러 주세요.');
   }
