@@ -526,7 +526,8 @@
   function blocksOf(kind) {
     const { name, marker } = BLOCKS[kind];
     return [...document.querySelectorAll('p')]
-      .filter((node) => dom.textOf(node) === `- ${name}`)
+      // 블록이 여러 개면 머리글에 번호가 붙는다: '- 학내외활동 1', '- 학내외활동 2'
+      .filter((node) => new RegExp(`^-\\s*${name}(\\s*\\d+)?$`).test(dom.textOf(node)))
       .map((header) => {
         let node = header.parentElement;
         while (node && !node.querySelector(marker)) node = node.parentElement;
