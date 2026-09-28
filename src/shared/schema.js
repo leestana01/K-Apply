@@ -23,6 +23,8 @@
         { key: 'englishName', label: '영문 이름', type: 'text', placeholder: 'Gildong Hong', hint: '여권 표기와 동일하게 입력하세요.' },
         { key: 'email', label: '이메일', type: 'email', placeholder: 'name@example.com', autocomplete: 'email' },
         { key: 'phone', label: '휴대전화', type: 'tel', placeholder: '010-1234-5678', autocomplete: 'tel' },
+        { key: 'emergencyPhone', label: '긴급 연락처', type: 'tel', placeholder: '010-0000-0000', hint: '지원서에 비상·긴급 연락처 칸이 있을 때 사용합니다.' },
+        { key: 'emergencyRelation', label: '긴급 연락처 관계', type: 'text', placeholder: '모', hint: '부 · 모 · 배우자 · 형제 등 지원서의 선택지와 같은 표기로 입력하세요.' },
         { key: 'birthdate', label: '생년월일', type: 'date' },
         {
           key: 'gender',

@@ -240,45 +240,65 @@
     const chosen = segmentValue(group);
     if (!/군필|복무/.test(chosen)) return;
 
+    // 입대·제대 날짜: 기업마다 '입대일/제대일', '입대년월/제대년월', '전역일' 등으로 표기한다.
     const dateFields = [
-      ['입대일', 'military.startDate'],
-      ['제대일', 'military.endDate'],
+      [/입대/, '입대일', 'military.startDate'],
+      [/제대|전역/, '제대일', 'military.endDate'],
     ];
-    for (const [placeholder, path] of dateFields) {
-      const input = await dom.waitFor(() => visibleControls(`input[placeholder="${placeholder}"]`).find((element) => !element.disabled), { timeout: 1200 });
+    for (const [pattern, label, path] of dateFields) {
+      const input = await dom.waitFor(
+        () => visibleControls('input[type="text"]').find((element) => !element.disabled && !element.name && pattern.test(element.getAttribute('placeholder') || '')),
+        { timeout: 1200 }
+      );
       const value = text.formatDate(session.get(path), 'YYYY.MM.DD');
       if (!input) {
-        if (value) session.manual(SECTION.military, placeholder, '입력 칸이 활성화되지 않았습니다.');
+        if (value) session.manual(SECTION.military, label, `${label} 칸이 활성화되지 않아 '${value}'을(를) 넣지 못했습니다.`);
         continue;
       }
-      // 입대일·제대일은 월 단위(YYYY.MM) 입력 마스크를 쓰는 기업이 있다.
-      await applyDate(session, { section: SECTION.military, label: placeholder, input, value });
+      // 월 단위(YYYY.MM) 입력 마스크를 쓰는 기업이 있다.
+      await applyDate(session, { section: SECTION.military, label, input, value });
     }
 
-    // 계급 · 제대구분 드롭다운은 선택 후 버튼 문구가 바뀌므로 순서로 찾는다.
-    const dropdowns = inRow(/^병역/, 'button').filter(isDropdown);
-    const plans = [
-      [/계급/, '계급', 'military.rank'],
-      [/제대|전역/, '제대 구분', 'military.discharge'],
+    // 계급·제대구분·군별 드롭다운: 기업마다 켜는 칸과 순서가 다르고, 선택하면 안내 문구가 값으로 바뀐다.
+    // 그래서 안내 문구 또는 현재 값의 종류로 어떤 칸인지 구분한다.
+    const KINDS = [
+      { key: 'rank', label: '계급', path: 'military.rank', placeholder: /계급/, value: /^(이병|일병|상병|병장|하사|중사|상사|원사|준위|소위|중위|대위|소령|중령|대령|준장|소장|중장|대장|훈련병|기타)$/ },
+      { key: 'discharge', label: '제대 구분', path: 'military.discharge', placeholder: /제대|전역|소집/, value: /(만기|의가사|의병|소집해제|불명예|제대|전역|면제)/ },
+      { key: 'branch', label: '군별', path: 'military.branch', placeholder: /군별|군\s*종|복무\s*형태/, value: /(육군|해군|공군|해병|의경|의무경찰|전경|해경|사회복무|공익|병역특례|산업기능|전문연구|카투사|의무소방|상근|기타)/ },
     ];
-    for (let index = 0; index < plans.length; index += 1) {
-      const [placeholder, label, path] = plans[index];
-      const trigger = dropdowns.find((button) => placeholder.test(dom.textOf(button))) || dropdowns[index];
-      const candidates = session.candidates(path);
+    const triggers = inRow(/^병역/, 'button').filter((button) => button.type === 'button' && !isSegment(button) && !/^\d+\s*개월$/.test(dom.textOf(button)));
+    const kindOf = (button) => {
+      const shown = dom.textOf(button);
+      return (
+        KINDS.find((kind) => /선택/.test(shown) && kind.placeholder.test(shown)) ||
+        KINDS.find((kind) => !/선택/.test(shown) && kind.value.test(shown)) ||
+        null
+      );
+    };
+    for (const kind of KINDS) {
+      const trigger = triggers.find((button) => kindOf(button) === kind);
+      const candidates = session.candidates(kind.path);
       if (!trigger) {
-        if (candidates.length) session.manual(SECTION.military, label, '선택 칸을 찾지 못했습니다.');
+        if (candidates.length && kind.key !== 'branch') session.manual(SECTION.military, kind.label, `${kind.label} 선택 칸을 찾지 못해 '${candidates[0]}'을(를) 넣지 못했습니다.`);
         continue;
       }
       await session.apply({
         section: SECTION.military,
-        label,
+        label: kind.label,
         value: candidates,
         filled: !/선택해\s*주세요/.test(dom.textOf(trigger)),
         run: async () => {
-          if (trigger.disabled) return { ok: false, reason: '선택 칸이 비활성화되어 있습니다.' };
+          if (trigger.disabled) return { ok: false, reason: `${kind.label} 선택 칸이 비활성화되어 있습니다.` };
           return controls.fillButtonDropdown(trigger, candidates);
         },
       });
+    }
+
+    // 병과(보직): 입력칸
+    const role = visibleControls('input[type="text"]').find((element) => /militaryRole$/.test(element.name || '') || /병과/.test(element.getAttribute('placeholder') || ''));
+    const specialty = session.get('military.specialty');
+    if (role && !text.isBlank(specialty)) {
+      await session.apply({ section: SECTION.military, label: '병과', value: specialty, filled: controls.hasValue(role), run: () => controls.fillText(role, specialty) });
     }
   }
 
@@ -390,6 +410,74 @@
     }
   }
 
+
+  /** 긴급(비상) 연락처: 전화번호 입력칸과 관계 드롭다운 */
+  async function fillEmergency(session) {
+    const phone = document.querySelector('input[name$="emergencyContact.emergencyPhoneNumber"]');
+    if (!phone || !dom.isVisible(phone)) return;
+    const value = session.textValue('basic.phone', phone, session.get('basic.emergencyPhone'));
+    if (text.isBlank(value)) {
+      session.manual(SECTION.basic, '긴급 연락처', '프로필에 긴급 연락처가 없습니다. 옵션 화면의 기본 정보에 입력하면 다음부터 채웁니다.');
+    } else {
+      await session.apply({ section: SECTION.basic, label: '긴급 연락처', value, filled: controls.hasValue(phone), run: () => controls.fillText(phone, value) });
+    }
+    const relation = inRow(/^긴급\s*연락처/, 'button').find((button) => button.type === 'button' && !isSegment(button));
+    const candidates = session.candidates('basic.emergencyRelation');
+    if (!relation) return;
+    if (!candidates.length) {
+      if (/선택/.test(dom.textOf(relation))) session.manual(SECTION.basic, '긴급 연락처 관계', '프로필에 긴급 연락처 관계가 없습니다. 옵션 화면의 기본 정보에 입력해 주세요.');
+      return;
+    }
+    await session.apply({
+      section: SECTION.basic,
+      label: '긴급 연락처 관계',
+      value: candidates,
+      filled: !/선택/.test(dom.textOf(relation)),
+      run: () => controls.fillButtonDropdown(relation, candidates),
+    });
+  }
+
+  /** 지원경로 드롭다운: 프로필의 지원 경로(쉼표로 여러 표현 가능) 중 선택지에 있는 것을 고른다. */
+  async function fillApplySource(session) {
+    const trigger = inRow(/^지원\s*경로/, 'button').find((button) => button.type === 'button' && !isSegment(button));
+    if (!trigger) return;
+    const candidates = session.candidates('application.source');
+    if (!candidates.length) {
+      if (/선택|지원\s*경로/.test(dom.textOf(trigger))) session.manual(SECTION.application, '지원경로', '프로필에 지원 경로가 없습니다. 옵션 화면의 지원 정보에 입력해 주세요.');
+      return;
+    }
+    await session.apply({
+      section: SECTION.application,
+      label: '지원경로',
+      value: candidates,
+      filled: !/선택|^지원\s*경로$/.test(dom.textOf(trigger)),
+      run: () => controls.fillButtonDropdown(trigger, candidates),
+    });
+  }
+
+  /** 주민등록지: 현주소와 같으면 [상동]으로 채운다(프로필 주소는 하나이므로 현주소와 같다고 본다). */
+  async function fillResidentAddress(session) {
+    const field = (key) => document.querySelector(`[name="addressGroupResumeItemAnswers.residentAddress.${key}"]`);
+    const current = (key) => document.querySelector(`[name="addressGroupResumeItemAnswers.currentAddress.${key}"]`);
+    const address = field('address');
+    if (!address || !dom.isVisible(address)) return;
+    const same = inRow(/^주민\s*등록지/, 'button').find((button) => /^상동$/.test(dom.textOf(button)));
+    const currentAddress = current('address');
+    await session.apply({
+      section: SECTION.basic,
+      label: '주민등록지',
+      value: currentAddress && currentAddress.value ? '상동' : session.get('basic.address'),
+      filled: controls.hasValue(address),
+      run: async () => {
+        if (!currentAddress || !controls.hasValue(currentAddress)) return { ok: false, reason: '현주소가 비어 있어 주민등록지를 [상동]으로 채울 수 없습니다. 현주소를 먼저 입력해 주세요.' };
+        if (!same) return { ok: false, reason: '주민등록지의 [상동] 버튼을 찾지 못했습니다. 직접 입력해 주세요.' };
+        same.click();
+        const copied = await dom.waitFor(() => (address.value && address.value === currentAddress.value ? true : null), { timeout: 2000 });
+        if (!copied) return { ok: false, reason: '[상동]을 눌렀지만 주민등록지에 현주소가 복사되지 않았습니다.' };
+        return { ok: true, detail: `상동 — ${address.value}` };
+      },
+    });
+  }
 
   function checkApplySector(session) {
     const trigger = inRow(/^지원\s*분야/, 'button').find(isDropdown);
@@ -1140,6 +1228,9 @@
       await fillMilitary(session);
       await fillPreferential(session);
       await fillAddress(session);
+      await fillResidentAddress(session);
+      await fillEmergency(session);
+      await fillApplySource(session);
       await fillLinks(session);
       await fillNationality(session);
     }
