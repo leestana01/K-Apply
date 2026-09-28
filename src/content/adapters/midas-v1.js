@@ -912,7 +912,7 @@
     }
   }
 
-  const portfolioUrls = () => visibleControls('input[name*="portfolioFile."]').filter((input) => /\.url$/.test(input.name));
+  const portfolioUrls = () => visibleControls('input[name*="portfolioFile"]').filter((input) => /\.url$/.test(input.name));
 
   /**
    * 포트폴리오 행: [첨부파일 추가] + URL 입력칸. 옵션에 포트폴리오 파일이 있으면 첨부하고 서버 수신까지 검증,
