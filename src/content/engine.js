@@ -234,7 +234,8 @@
       if (!entries.length) return;
       const names = entries.map((entry) => entryTitle(sectionId, entry)).filter(Boolean);
       const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` 외 ${names.length - 3}건` : '');
-      const limit = Number.isInteger(accepted) && accepted > 0 ? `이 지원서는 ${accepted}건까지 받습니다. ` : '';
+      // 기업의 규칙을 단정하지 않고 관찰한 사실만 적는다(추가 칸이 사라졌거나 안내 문구의 개수에 이름).
+      const limit = Number.isInteger(accepted) && accepted > 0 ? `지원서에 ${accepted}건이 들어가 있고 ` : '';
       this.report.add(
         STATUS.MANUAL,
         section,
