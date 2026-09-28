@@ -152,7 +152,7 @@
       section: SECTION.basic,
       label: '국적',
       value: nationalityCandidates(session.get('basic.nationality')),
-      filled: !/선택해\s*주세요/.test(dom.textOf(trigger)),
+      filled: !pickerEmpty(trigger),
       run: () => controls.fillButtonDropdown(trigger, nationalityCandidates(session.get('basic.nationality'))),
     });
   }
@@ -286,7 +286,7 @@
         section: SECTION.military,
         label: kind.label,
         value: candidates,
-        filled: !/선택해\s*주세요/.test(dom.textOf(trigger)),
+        filled: !pickerEmpty(trigger),
         run: async () => {
           if (trigger.disabled) return { ok: false, reason: `${kind.label} 선택 칸이 비활성화되어 있습니다.` };
           return controls.fillButtonDropdown(trigger, candidates);
@@ -617,13 +617,24 @@
     });
   }
 
+  /**
+   * 선택 칸이 비어 있는지: 안내 문구가 '…을 선택해주세요', '해외경험 국가선택'처럼 '선택'을 포함하거나,
+   * '해외 경험 목적'처럼 행 제목과 같은 문구이면 아직 고르지 않은 것이다.
+   */
+  function pickerEmpty(trigger) {
+    const shown = dom.textOf(trigger);
+    if (!shown || /선택|^만점\s*기준$|^등급$/.test(shown)) return true;
+    const title = rowLabel(trigger);
+    return !!title && text.normalize(shown) === text.normalize(title);
+  }
+
   async function applyDropdown(session, { section, label, trigger, candidates }) {
     if (!trigger || !candidates.length) return;
     await session.apply({
       section,
       label,
       value: candidates,
-      filled: !/선택해\s*주세요|^만점기준$/.test(dom.textOf(trigger)),
+      filled: !pickerEmpty(trigger),
       run: async () => {
         const enabled = await dom.waitFor(() => (!trigger.disabled ? trigger : null), { timeout: 1500 });
         if (!enabled) return { ok: false, reason: '선택 칸이 비활성화되어 있습니다.' };
@@ -1270,13 +1281,22 @@
   const joinContents = (entry) => [entry.organization && entry.name && entry.name !== entry.organization ? entry.name : '', entry.description].filter(Boolean).join(' - ');
 
   /** 필수 선택 칸인데 프로필에 값이 없으면 항목 이름과 함께 알린다. */
-  async function applyRequiredDropdown(session, { section, label, trigger, value, hint }) {
+  const DOMESTIC = /^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|국내|한국|대한민국)/;
+
+  /** 지역·국가 후보: 국내 지역이면 국가 목록만 있는 선택지를 위해 '대한민국'도 후보에 넣는다. */
+  function locationCandidates(value) {
+    const shown = String(value || '').trim();
+    if (!shown) return [];
+    return DOMESTIC.test(shown) ? [...new Set([shown, shown.replace(/(특별시|광역시|특별자치시|특별자치도|도)$/, ''), '대한민국', '한국', '국내'])] : [shown];
+  }
+
+  async function applyRequiredDropdown(session, { section, label, trigger, value, hint, candidates = null }) {
     if (!trigger) return;
     if (text.isBlank(value)) {
-      if (/선택/.test(dom.textOf(trigger)) || dom.textOf(trigger) === label) session.manual(section, label, `프로필에 ${hint}이(가) 없습니다. 옵션 화면에서 입력하거나 직접 선택해 주세요.`);
+      if (pickerEmpty(trigger)) session.manual(section, label, `프로필에 ${hint}이(가) 없습니다. 옵션 화면에서 입력하거나 직접 선택해 주세요.`);
       return;
     }
-    await applyDropdown(session, { section, label, trigger, candidates: [String(value).trim()] });
+    await applyDropdown(session, { section, label, trigger, candidates: candidates || [String(value).trim()] });
   }
 
   async function fillActivities(session) {
@@ -1353,7 +1373,7 @@
       (element) => !element.disabled && !element.readOnly && !controls.hasValue(element) && markedRequired(element)
     );
     const pickers = visibleControls('button').filter(
-      (button) => button.type === 'button' && !button.disabled && /선택해\s*주세요|^선택$/.test(dom.textOf(button)) && markedRequired(button)
+      (button) => button.type === 'button' && !button.disabled && !isSegment(button) && !button.closest('ul') && !/추가하기|첨부/.test(dom.textOf(button)) && pickerEmpty(button) && markedRequired(button)
     );
     const names = [...new Set([...empty, ...pickers].map(fieldName))];
     if (!names.length) return;
@@ -1383,7 +1403,7 @@
       await applyDate(session, { section, label: '활동 시작', input: period[0], value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       await applyDate(session, { section, label: '활동 종료', input: period[1], value: endDate(entry.endDate) });
       await applyText(session, { section, label: '봉사 시간', input: block.querySelector('input[name$=".time"]'), value: text.digitsOnly(entry.hours || '') });
-      await applyRequiredDropdown(session, { section, label: '봉사 지역', trigger: pickerIn(/^봉사\s*지역/, block), value: entry.location, hint: `'${name}'의 봉사 지역` });
+      await applyRequiredDropdown(session, { section, label: '봉사 지역', trigger: pickerIn(/^봉사\s*지역/, block), value: entry.location, hint: `'${name}'의 봉사 지역`, candidates: locationCandidates(entry.location) });
       await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name$=".comment"]'), value: joinContents(entry) });
     }
   }
@@ -1402,7 +1422,7 @@
       const name = entry.name || entry.location;
       const section = `해외경험 · ${name}`;
       await applyRequiredDropdown(session, { section, label: '해외경험 목적', trigger: pickerIn(/^해외\s*경험\s*목적/, block), value: entry.detailType, hint: `'${name}'의 해외경험 목적(세부 구분)` });
-      await applyRequiredDropdown(session, { section, label: '국가', trigger: pickerIn(/^국가/, block), value: entry.location, hint: `'${name}'의 국가` });
+      await applyRequiredDropdown(session, { section, label: '국가', trigger: pickerIn(/^국가/, block), value: entry.location, hint: `'${name}'의 국가`, candidates: locationCandidates(entry.location) });
       await applyDate(session, { section, label: '출국', input: block.querySelector('input[placeholder^="출국"]'), value: text.formatDate(entry.startDate, 'YYYY.MM.DD') });
       await applyDate(session, { section, label: '입국', input: block.querySelector('input[placeholder^="입국"]'), value: endDate(entry.endDate) });
       await applyLongText(session, { section, label: '상세 내용', input: block.querySelector('textarea[name*="overseasExperience"]'), value: [entry.name, entry.description].filter(Boolean).join(' - ') });
